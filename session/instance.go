@@ -1,6 +1,7 @@
 package session
 
 import (
+	"claude-squad/config"
 	"claude-squad/log"
 	"claude-squad/session/git"
 	"claude-squad/session/tmux"
@@ -117,7 +118,7 @@ func FromInstanceData(data InstanceData) (*Instance, error) {
 		Width:     data.Width,
 		CreatedAt: data.CreatedAt,
 		UpdatedAt: data.UpdatedAt,
-		Program:   data.Program,
+		Program:   config.NormalizeProgramCommand(data.Program),
 		gitWorktree: git.NewGitWorktreeFromStorage(
 			data.Worktree.RepoPath,
 			data.Worktree.WorktreePath,
@@ -133,13 +134,23 @@ func FromInstanceData(data InstanceData) (*Instance, error) {
 		},
 	}
 
+	instance.tmuxSession = tmux.NewTmuxSession(instance.Title, instance.Program)
+
 	if instance.Paused() {
 		instance.started = true
-		instance.tmuxSession = tmux.NewTmuxSession(instance.Title, instance.Program)
-	} else {
-		if err := instance.Start(false); err != nil {
-			return nil, err
+		return instance, nil
+	}
+
+	if !instance.TmuxAlive() {
+		instance.started = true
+		if instance.Status == Loading {
+			instance.SetStatus(Ready)
 		}
+		return instance, nil
+	}
+
+	if err := instance.Start(false); err != nil {
+		return nil, err
 	}
 
 	return instance, nil
@@ -172,7 +183,7 @@ func NewInstance(opts InstanceOptions) (*Instance, error) {
 		Title:          opts.Title,
 		Status:         Ready,
 		Path:           absPath,
-		Program:        opts.Program,
+		Program:        config.NormalizeProgramCommand(opts.Program),
 		Height:         0,
 		Width:          0,
 		CreatedAt:      t,
@@ -317,14 +328,14 @@ func (i *Instance) combineErrors(errs []error) error {
 }
 
 func (i *Instance) Preview() (string, error) {
-	if !i.started || i.Status == Paused {
+	if !i.started || i.Status == Paused || !i.TmuxAlive() {
 		return "", nil
 	}
 	return i.tmuxSession.CapturePaneContent()
 }
 
 func (i *Instance) HasUpdated() (updated bool, hasPrompt bool) {
-	if !i.started {
+	if !i.started || !i.TmuxAlive() {
 		return false, false
 	}
 	return i.tmuxSession.HasUpdated()
@@ -332,13 +343,7 @@ func (i *Instance) HasUpdated() (updated bool, hasPrompt bool) {
 
 // CheckAndHandleTrustPrompt checks for and dismisses the trust prompt for supported programs.
 func (i *Instance) CheckAndHandleTrustPrompt() bool {
-	if !i.started || i.tmuxSession == nil {
-		return false
-	}
-	program := i.Program
-	if !strings.HasSuffix(program, tmux.ProgramClaude) &&
-		!strings.HasSuffix(program, tmux.ProgramAider) &&
-		!strings.HasSuffix(program, tmux.ProgramGemini) {
+	if !i.started || i.tmuxSession == nil || !i.TmuxAlive() {
 		return false
 	}
 	return i.tmuxSession.CheckAndHandleTrustPrompt()
@@ -365,6 +370,9 @@ func (i *Instance) SetPreviewSize(width, height int) error {
 	if !i.started || i.Status == Paused {
 		return fmt.Errorf("cannot set preview size for instance that has not been started or " +
 			"is paused")
+	}
+	if !i.TmuxAlive() {
+		return nil
 	}
 	return i.tmuxSession.SetDetachedSize(width, height)
 }
@@ -405,6 +413,9 @@ func (i *Instance) Paused() bool {
 
 // TmuxAlive returns true if the tmux session is alive. This is a sanity check before attaching.
 func (i *Instance) TmuxAlive() bool {
+	if i.tmuxSession == nil {
+		return false
+	}
 	return i.tmuxSession.DoesSessionExist()
 }
 
@@ -473,8 +484,24 @@ func (i *Instance) Resume() error {
 	if !i.started {
 		return fmt.Errorf("cannot resume instance that has not been started")
 	}
+
 	if i.Status != Paused {
-		return fmt.Errorf("can only resume paused instances")
+		if i.TmuxAlive() {
+			return fmt.Errorf("can only resume paused or stopped instances")
+		}
+		worktreePath := i.GetWorktreePath()
+		if worktreePath == "" {
+			return fmt.Errorf("cannot restart session: worktree path unavailable")
+		}
+		if _, err := os.Stat(worktreePath); err != nil {
+			return fmt.Errorf("cannot restart session: worktree is missing")
+		}
+		if err := i.tmuxSession.Start(worktreePath); err != nil {
+			log.ErrorLog.Print(err)
+			return fmt.Errorf("failed to restart stopped session: %w", err)
+		}
+		i.SetStatus(Running)
+		return nil
 	}
 
 	// Check if branch is checked out
@@ -593,7 +620,7 @@ func (i *Instance) SendPrompt(prompt string) error {
 
 // PreviewFullHistory captures the entire tmux pane output including full scrollback history
 func (i *Instance) PreviewFullHistory() (string, error) {
-	if !i.started || i.Status == Paused {
+	if !i.started || i.Status == Paused || !i.TmuxAlive() {
 		return "", nil
 	}
 	return i.tmuxSession.CapturePaneContentWithOptions("-", "-")
@@ -606,7 +633,7 @@ func (i *Instance) SetTmuxSession(session *tmux.TmuxSession) {
 
 // SendKeys sends keys to the tmux session
 func (i *Instance) SendKeys(keys string) error {
-	if !i.started || i.Status == Paused {
+	if !i.started || i.Status == Paused || !i.TmuxAlive() {
 		return fmt.Errorf("cannot send keys to instance that has not been started or is paused")
 	}
 	return i.tmuxSession.SendKeys(keys)

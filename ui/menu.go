@@ -132,7 +132,7 @@ func (m *Menu) addInstanceOptions() {
 
 	// Action group
 	actionGroup := []keys.KeyName{keys.KeyEnter, keys.KeySubmit}
-	if m.instance.Status == session.Paused {
+	if m.instance.Status == session.Paused || !m.instance.TmuxAlive() {
 		actionGroup = append(actionGroup, keys.KeyResume)
 	} else {
 		actionGroup = append(actionGroup, keys.KeyCheckout)

@@ -15,34 +15,27 @@ import (
 
 func TestBuildSessionProfilesSelectsDefaultProgramProfile(t *testing.T) {
 	cfg := &config.Config{
-		DefaultProgram: "claude",
-		Profiles: []config.Profile{
-			{Name: "claude", Program: "/usr/local/bin/claude"},
-			{Name: "codex", Program: "codex"},
-		},
+		DefaultProgram: "/usr/local/bin/claude",
 	}
 
 	profiles, selected := buildSessionProfiles(cfg, cfg.GetProgram(), false)
 
 	require.Len(t, profiles, 2)
 	assert.Equal(t, 0, selected)
-	assert.Equal(t, "/usr/local/bin/claude", profiles[selected].Program)
+	assert.Equal(t, "Claude", profiles[selected].Name)
 }
 
 func TestBuildSessionProfilesPreselectsOverrideProgram(t *testing.T) {
 	cfg := &config.Config{
-		DefaultProgram: "claude",
-		Profiles: []config.Profile{
-			{Name: "claude", Program: "claude"},
-			{Name: "codex", Program: "codex"},
-		},
+		DefaultProgram: "/usr/local/bin/claude",
 	}
 
 	profiles, selected := buildSessionProfiles(cfg, "codex", true)
 
 	require.Len(t, profiles, 2)
 	assert.Equal(t, 1, selected)
-	assert.Equal(t, "codex", profiles[selected].Program)
+	assert.Equal(t, "Codex", profiles[selected].Name)
+	assert.Contains(t, profiles[selected].Program, "check_for_update_on_startup=false")
 }
 
 func TestBuildSessionProfilesAddsTemporaryOverrideProgramWhenMissing(t *testing.T) {
@@ -57,32 +50,30 @@ func TestBuildSessionProfilesAddsTemporaryOverrideProgramWhenMissing(t *testing.
 
 	require.Len(t, profiles, 2)
 	assert.Equal(t, 1, selected)
-	assert.Equal(t, "codex", profiles[selected].Name)
-	assert.Equal(t, "codex", profiles[selected].Program)
+	assert.Equal(t, "Codex", profiles[selected].Name)
+	assert.NotEmpty(t, profiles[selected].Program)
 }
 
-func TestBuildSessionProfilesPreservesRawDefaultProgramWhenProfilesExist(t *testing.T) {
+func TestBuildSessionProfilesAppendsCustomConfiguredProfileWithoutPathLabel(t *testing.T) {
 	cfg := &config.Config{
-		DefaultProgram: "/usr/local/bin/custom-agent --fast",
+		DefaultProgram: "claude",
 		Profiles: []config.Profile{
-			{Name: "claude", Program: "claude"},
-			{Name: "codex", Program: "codex"},
+			{Name: "/usr/local/bin/custom-agent --fast", Program: "/usr/local/bin/custom-agent --fast"},
 		},
 	}
 
-	profiles, selected := buildSessionProfiles(cfg, cfg.GetProgram(), false)
+	profiles, _ := buildSessionProfiles(cfg, cfg.GetProgram(), false)
 
 	require.Len(t, profiles, 3)
-	assert.Equal(t, 2, selected)
-	assert.Equal(t, "/usr/local/bin/custom-agent --fast", profiles[selected].Name)
-	assert.Equal(t, "/usr/local/bin/custom-agent --fast", profiles[selected].Program)
+	assert.Equal(t, "Custom-agent", profiles[2].Name)
+	assert.Equal(t, "/usr/local/bin/custom-agent --fast", profiles[2].Program)
 }
 
 func TestNewCreateSessionInstanceUsesSelectedProgram(t *testing.T) {
 	instance, err := newCreateSessionInstance("feature", ".", "codex", "ship it", "", true)
 	require.NoError(t, err)
 
-	assert.Equal(t, "codex", instance.Program)
+	assert.Equal(t, "codex", providerKey(instance.Program))
 	assert.Equal(t, "ship it", instance.Prompt)
 	assert.True(t, instance.AutoYes)
 	assert.Equal(t, session.Loading, instance.Status)

@@ -73,6 +73,9 @@ func (p *PreviewPane) UpdateContent(instance *session.Instance) error {
 				)),
 		))
 		return nil
+	case !instance.TmuxAlive():
+		p.setFallbackState("Session is not running. Press 'r' to restart.")
+		return nil
 	}
 
 	var content string
@@ -184,7 +187,7 @@ func (p *PreviewPane) String() string {
 
 // ScrollUp scrolls up in the viewport
 func (p *PreviewPane) ScrollUp(instance *session.Instance) error {
-	if instance == nil || instance.Status == session.Paused {
+	if instance == nil || instance.Status == session.Paused || !instance.TmuxAlive() {
 		return nil
 	}
 
@@ -217,7 +220,7 @@ func (p *PreviewPane) ScrollUp(instance *session.Instance) error {
 
 // ScrollDown scrolls down in the viewport
 func (p *PreviewPane) ScrollDown(instance *session.Instance) error {
-	if instance == nil || instance.Status == session.Paused {
+	if instance == nil || instance.Status == session.Paused || !instance.TmuxAlive() {
 		return nil
 	}
 
@@ -250,7 +253,7 @@ func (p *PreviewPane) ScrollDown(instance *session.Instance) error {
 
 // ResetToNormalMode exits scroll mode and returns to normal mode
 func (p *PreviewPane) ResetToNormalMode(instance *session.Instance) error {
-	if instance == nil || instance.Status == session.Paused {
+	if instance == nil || instance.Status == session.Paused || !instance.TmuxAlive() {
 		return nil
 	}
 

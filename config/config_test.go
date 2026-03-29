@@ -98,6 +98,38 @@ func TestGetClaudeCommand(t *testing.T) {
 	})
 }
 
+func TestNormalizeProgramCommand(t *testing.T) {
+	originalShell := os.Getenv("SHELL")
+	originalPath := os.Getenv("PATH")
+	defer func() {
+		os.Setenv("SHELL", originalShell)
+		os.Setenv("PATH", originalPath)
+	}()
+
+	t.Run("replaces pnpm codex shim with shell resolved codex", func(t *testing.T) {
+		tempDir := t.TempDir()
+		codexPath := filepath.Join(tempDir, "codex")
+
+		err := os.WriteFile(codexPath, []byte("#!/bin/bash\necho 'mock codex'"), 0755)
+		require.NoError(t, err)
+
+		os.Setenv("PATH", tempDir)
+		os.Setenv("SHELL", "/bin/bash")
+
+		result := NormalizeProgramCommand("/Users/test/Library/pnpm/codex -c check_for_update_on_startup=false")
+
+		assert.Contains(t, result, "codex")
+		assert.NotContains(t, result, "/Library/pnpm/")
+		assert.Contains(t, result, "check_for_update_on_startup=false")
+		assert.Contains(t, result, "--no-alt-screen")
+	})
+
+	t.Run("preserves explicit custom absolute paths", func(t *testing.T) {
+		result := NormalizeProgramCommand("/opt/custom/codex --sandbox workspace-write")
+		assert.Equal(t, "/opt/custom/codex --sandbox workspace-write", result)
+	})
+}
+
 func TestDefaultConfig(t *testing.T) {
 	t.Run("creates config with default values", func(t *testing.T) {
 		config := DefaultConfig()

@@ -285,6 +285,25 @@ func TestPreviewScrolling(t *testing.T) {
 	require.False(t, previewPane.isScrolling, "Should not be in scrolling mode after reset")
 }
 
+func TestPreviewShowsRestartFallbackForStoppedSession(t *testing.T) {
+	log.Initialize(false)
+	defer log.Close()
+
+	instance := makeStartedInstance(t, "stopped-preview")
+	defer func() { _ = instance.Kill() }()
+
+	deadSession := newMockTmuxSession(t, "stopped-preview-dead", mockCmdExec("", false))
+	instance.SetTmuxSession(deadSession)
+
+	previewPane := NewPreviewPane()
+	previewPane.SetSize(80, 30)
+
+	err := previewPane.UpdateContent(instance)
+	require.NoError(t, err)
+	require.True(t, previewPane.previewState.fallback)
+	require.Contains(t, previewPane.previewState.text, "Press 'r' to restart")
+}
+
 // MockPtyFactory for testing tmux sessions
 type MockPtyFactory struct {
 	t       *testing.T

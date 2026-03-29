@@ -82,12 +82,22 @@ func (s *Storage) LoadInstances() ([]*Instance, error) {
 	}
 
 	instances := make([]*Instance, len(instancesData))
+	needsNormalizationSave := false
 	for i, data := range instancesData {
 		instance, err := FromInstanceData(data)
 		if err != nil {
 			return nil, fmt.Errorf("failed to create instance %s: %w", data.Title, err)
 		}
+		if instance.Program != data.Program {
+			needsNormalizationSave = true
+		}
 		instances[i] = instance
+	}
+
+	if needsNormalizationSave {
+		if err := s.SaveInstances(instances); err != nil {
+			return nil, fmt.Errorf("failed to save normalized instances: %w", err)
+		}
 	}
 
 	return instances, nil

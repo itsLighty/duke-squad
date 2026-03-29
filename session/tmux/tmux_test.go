@@ -86,3 +86,23 @@ func TestStartTmuxSession(t *testing.T) {
 	_, err = ptyFactory.files[1].Stat()
 	require.NoError(t, err)
 }
+
+func TestHasUpdatedInitializesMonitor(t *testing.T) {
+	cmdExec := cmd_test.MockCmdExec{
+		RunFunc: func(cmd *exec.Cmd) error {
+			return nil
+		},
+		OutputFunc: func(cmd *exec.Cmd) ([]byte, error) {
+			return []byte("ready"), nil
+		},
+	}
+
+	session := newTmuxSession("test-session", "codex", NewMockPtyFactory(t), cmdExec)
+	require.Nil(t, session.monitor)
+
+	updated, hasPrompt := session.HasUpdated()
+
+	require.True(t, updated)
+	require.False(t, hasPrompt)
+	require.NotNil(t, session.monitor)
+}

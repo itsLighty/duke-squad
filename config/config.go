@@ -9,6 +9,7 @@ import (
 	"os/user"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"strings"
 )
 
@@ -111,6 +112,36 @@ func DefaultConfig() *Config {
 //
 // If both fail, it returns an error.
 func GetClaudeCommand() (string, error) {
+	return GetProgramCommand("claude")
+}
+
+func preferredProgramPath(name string) string {
+	if runtime.GOOS != "darwin" {
+		return ""
+	}
+
+	switch name {
+	case "codex":
+		for _, candidate := range []string{"/opt/homebrew/bin/codex", "/usr/local/bin/codex"} {
+			info, err := os.Stat(candidate)
+			if err == nil && !info.IsDir() && info.Mode()&0111 != 0 {
+				return candidate
+			}
+		}
+	}
+
+	return ""
+}
+
+// GetProgramCommand attempts to find the given command in the user's shell.
+// It checks in the following order:
+// 1. Shell resolution: using "command -v"
+// 2. PATH lookup
+func GetProgramCommand(name string) (string, error) {
+	if preferred := preferredProgramPath(name); preferred != "" {
+		return preferred, nil
+	}
+
 	shell := os.Getenv("SHELL")
 	if shell == "" {
 		shell = "/bin/bash" // Default to bash if SHELL is not set
@@ -120,11 +151,11 @@ func GetClaudeCommand() (string, error) {
 	// For zsh, source .zshrc; for bash, source .bashrc
 	var shellCmd string
 	if strings.Contains(shell, "zsh") {
-		shellCmd = "source ~/.zshrc &>/dev/null || true; which claude"
+		shellCmd = fmt.Sprintf("source ~/.zshrc &>/dev/null || true; command -v %s", name)
 	} else if strings.Contains(shell, "bash") {
-		shellCmd = "source ~/.bashrc &>/dev/null || true; which claude"
+		shellCmd = fmt.Sprintf("source ~/.bashrc &>/dev/null || true; command -v %s", name)
 	} else {
-		shellCmd = "which claude"
+		shellCmd = fmt.Sprintf("command -v %s", name)
 	}
 
 	cmd := exec.Command(shell, "-c", shellCmd)
@@ -139,17 +170,67 @@ func GetClaudeCommand() (string, error) {
 			if len(matches) > 1 {
 				path = matches[1]
 			}
+			if preferred := preferredProgramPath(name); preferred != "" {
+				return preferred, nil
+			}
 			return path, nil
 		}
 	}
 
 	// Otherwise, try to find in PATH directly
-	claudePath, err := exec.LookPath("claude")
+	commandPath, err := exec.LookPath(name)
 	if err == nil {
-		return claudePath, nil
+		if preferred := preferredProgramPath(name); preferred != "" {
+			return preferred, nil
+		}
+		return commandPath, nil
 	}
 
-	return "", fmt.Errorf("claude command not found in aliases or PATH")
+	return "", fmt.Errorf("%s command not found in aliases or PATH", name)
+}
+
+// NormalizeProgramCommand resolves known built-in provider commands to a stable executable path
+// while preserving any existing arguments.
+func NormalizeProgramCommand(program string) string {
+	program = strings.TrimSpace(program)
+	if program == "" {
+		return program
+	}
+
+	fields := strings.Fields(program)
+	if len(fields) == 0 {
+		return program
+	}
+
+	executable := strings.Trim(fields[0], `"'`)
+	name := strings.TrimSuffix(filepath.Base(executable), filepath.Ext(executable))
+	name = strings.ToLower(name)
+
+	if name != "claude" && name != "codex" {
+		return program
+	}
+
+	// Preserve explicitly pinned absolute paths unless they are the pnpm shim that exits in tmux.
+	shouldResolve := executable == name || strings.Contains(executable, "/Library/pnpm/")
+	if !shouldResolve {
+		return program
+	}
+
+	resolved, err := GetProgramCommand(name)
+	if err != nil || resolved == "" {
+		resolved = executable
+	}
+
+	fields[0] = resolved
+	if name == "codex" {
+		if !strings.Contains(program, "check_for_update_on_startup=") {
+			fields = append(fields, "-c", "check_for_update_on_startup=false")
+		}
+		if !strings.Contains(program, "--no-alt-screen") {
+			fields = append(fields, "--no-alt-screen")
+		}
+	}
+	return strings.Join(fields, " ")
 }
 
 func LoadConfig() *Config {

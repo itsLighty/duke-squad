@@ -50,7 +50,7 @@ func (h helpTypeGeneral) toContent() string {
 		headerStyle.Render("Handoff:"),
 		keyStyle.Render("p")+descStyle.Render("         - Commit and push branch to github"),
 		keyStyle.Render("c")+descStyle.Render("         - Checkout: commit changes and pause session"),
-		keyStyle.Render("r")+descStyle.Render("         - Resume a paused session"),
+		keyStyle.Render("r")+descStyle.Render("         - Resume a paused session or restart a stopped one"),
 		"",
 		headerStyle.Render("Other:"),
 		keyStyle.Render("tab")+descStyle.Render("       - Switch between preview, diff, and terminal tabs"),
@@ -101,7 +101,7 @@ func (h helpTypeInstanceCheckout) toContent() string {
 		"",
 		headerStyle.Render("Commands:"),
 		keyStyle.Render("c")+descStyle.Render(" - Checkout: commit changes locally and pause session"),
-		keyStyle.Render("r")+descStyle.Render(" - Resume a paused session"),
+		keyStyle.Render("r")+descStyle.Render(" - Resume a paused session or restart a stopped one"),
 	)
 	return content
 }
