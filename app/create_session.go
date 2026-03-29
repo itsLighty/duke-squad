@@ -196,12 +196,18 @@ func buildSessionProfiles(cfg *config.Config, effectiveProgram string, programOv
 	return profiles, selectedIndex
 }
 
-func newCreateSessionInstance(title, path, program, prompt, branch string, autoYes bool) (*session.Instance, error) {
+func newCreateSessionInstance(title string, project *session.Project, program, prompt, branch string, autoYes bool) (*session.Instance, error) {
+	if project == nil {
+		return nil, fmt.Errorf("add a project first")
+	}
+
 	instance, err := session.NewInstance(session.InstanceOptions{
-		Title:   title,
-		Path:    path,
-		Program: program,
-		AutoYes: autoYes,
+		Title:       title,
+		Path:        project.RootPath,
+		Program:     program,
+		AutoYes:     autoYes,
+		ProjectID:   project.ID,
+		ProjectKind: project.Kind,
 	})
 	if err != nil {
 		return nil, err
@@ -219,23 +225,29 @@ func newCreateSessionInstance(title, path, program, prompt, branch string, autoY
 
 func (m *home) newCreateSessionOverlay(includePrompt bool) *overlay.TextInputOverlay {
 	profiles, selectedProfile := buildSessionProfiles(m.appConfig, m.program, m.programOverridden)
+	project := m.list.GetSelectedProject()
 	title := ""
 	if includePrompt {
 		title = "Initial prompt"
 	}
-	return overlay.NewSessionCreateOverlay(title, profiles, selectedProfile, includePrompt)
+	withBranchPicker := project != nil && project.Kind == session.ProjectKindGit
+	return overlay.NewSessionCreateOverlay(title, profiles, selectedProfile, includePrompt, withBranchPicker)
 }
 
 func (m *home) beginCreateSession(includePrompt bool) tea.Cmd {
+	project := m.list.GetSelectedProject()
+	if project == nil {
+		return m.handleError(fmt.Errorf("add a project first"))
+	}
+
 	m.state = stateCreate
 	m.menu.SetState(ui.StateNewInstance)
 	m.textInputOverlay = m.newCreateSessionOverlay(includePrompt)
 
 	cmds := []tea.Cmd{tea.WindowSize()}
-	if includePrompt {
+	if includePrompt && project.Kind == session.ProjectKindGit {
 		fetchCmd := func() tea.Msg {
-			currentDir, _ := os.Getwd()
-			git.FetchBranches(currentDir)
+			git.FetchBranches(project.RootPath)
 			return nil
 		}
 		cmds = append(cmds, fetchCmd, m.runBranchSearch("", m.textInputOverlay.BranchFilterVersion()))
@@ -247,6 +259,10 @@ func (m *home) beginCreateSession(includePrompt bool) tea.Cmd {
 func (m *home) submitCreateSession() tea.Cmd {
 	if m.textInputOverlay == nil {
 		return nil
+	}
+	project := m.list.GetSelectedProject()
+	if project == nil {
+		return m.handleError(fmt.Errorf("add a project first"))
 	}
 
 	title := strings.TrimSpace(m.textInputOverlay.GetTitleValue())
@@ -264,7 +280,7 @@ func (m *home) submitCreateSession() tea.Cmd {
 
 	instance, err := newCreateSessionInstance(
 		title,
-		".",
+		project,
 		program,
 		m.textInputOverlay.GetPromptValue(),
 		m.textInputOverlay.GetSelectedBranch(),
@@ -274,21 +290,14 @@ func (m *home) submitCreateSession() tea.Cmd {
 		return m.handleError(err)
 	}
 
-	finalize := m.list.AddInstance(instance)
-	m.list.SelectInstance(instance)
+	m.list.AddSession(project.ID, instance)
 	m.textInputOverlay = nil
 	m.state = stateDefault
 	m.menu.SetState(ui.StateDefault)
+	m.instanceStarting = true
+	m.startingInstance = instance
 
-	startCmd := func() tea.Msg {
-		err := instance.Start(true)
-		return instanceStartedMsg{
-			instance: instance,
-			err:      err,
-			finalize: finalize,
-		}
-	}
-
+	startCmd := runInstanceStartCmd(instance)
 	return tea.Batch(tea.WindowSize(), m.instanceChanged(), startCmd)
 }
 

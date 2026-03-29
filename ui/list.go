@@ -1,10 +1,9 @@
 package ui
 
 import (
-	"claude-squad/log"
 	"claude-squad/session"
-	"errors"
 	"fmt"
+	"path/filepath"
 	"strings"
 
 	"github.com/charmbracelet/bubbles/spinner"
@@ -53,55 +52,84 @@ var autoYesStyle = lipgloss.NewStyle().
 	Background(lipgloss.Color("#dde4f0")).
 	Foreground(lipgloss.Color("#1a1a1a"))
 
+type rowKind int
+
+const (
+	rowProject rowKind = iota
+	rowSession
+)
+
+type Selection struct {
+	Project *session.Project
+	Instance *session.Instance
+}
+
+type listRow struct {
+	kind     rowKind
+	project  *session.Project
+	instance *session.Instance
+}
+
 type List struct {
-	items         []*session.Instance
+	projects      []*session.Project
+	rows          []listRow
 	selectedIdx   int
 	height, width int
 	renderer      *InstanceRenderer
 	autoyes       bool
-
-	// map of repo name to number of instances using it. Used to display the repo name only if there are
-	// multiple repos in play.
-	repos map[string]int
 }
 
 func NewList(spinner *spinner.Model, autoYes bool) *List {
 	return &List{
-		items:    []*session.Instance{},
+		projects: []*session.Project{},
+		rows:     []listRow{},
 		renderer: &InstanceRenderer{spinner: spinner},
-		repos:    make(map[string]int),
 		autoyes:  autoYes,
 	}
 }
 
-// SetSize sets the height and width of the list.
+func (l *List) SetProjects(projects []*session.Project) {
+	l.projects = projects
+	l.rebuildRows()
+}
+
+func (l *List) GetProjects() []*session.Project {
+	return l.projects
+}
+
 func (l *List) SetSize(width, height int) {
 	l.width = width
 	l.height = height
 	l.renderer.setWidth(width)
 }
 
-// SetSessionPreviewSize sets the height and width for the tmux sessions. This makes the stdout line have the correct
-// width and height.
 func (l *List) SetSessionPreviewSize(width, height int) (err error) {
-	for i, item := range l.items {
-		if !item.Started() || item.Paused() {
-			continue
-		}
+	for _, project := range l.projects {
+		for _, item := range project.Sessions {
+			if !item.Started() || item.Paused() {
+				continue
+			}
 
-		if innerErr := item.SetPreviewSize(width, height); innerErr != nil {
-			err = errors.Join(
-				err, fmt.Errorf("could not set preview size for instance %d: %v", i, innerErr))
+			if innerErr := item.SetPreviewSize(width, height); innerErr != nil {
+				err = fmt.Errorf("%w; could not set preview size for %s: %v", err, item.Title, innerErr)
+			}
 		}
 	}
 	return
 }
 
-func (l *List) NumInstances() int {
-	return len(l.items)
+func (l *List) NumSessions() int {
+	total := 0
+	for _, project := range l.projects {
+		total += len(project.Sessions)
+	}
+	return total
 }
 
-// InstanceRenderer handles rendering of session.Instance objects
+func (l *List) NumInstances() int {
+	return l.NumSessions()
+}
+
 type InstanceRenderer struct {
 	spinner *spinner.Model
 	width   int
@@ -111,22 +139,44 @@ func (r *InstanceRenderer) setWidth(width int) {
 	r.width = AdjustPreviewWidth(width)
 }
 
-// ɹ and ɻ are other options.
-const branchIcon = "Ꮧ"
-
-func (r *InstanceRenderer) Render(i *session.Instance, idx int, selected bool, hasMultipleRepos bool) string {
-	prefix := fmt.Sprintf(" %d. ", idx)
-	if idx >= 10 {
-		prefix = prefix[:len(prefix)-1]
-	}
-	titleS := selectedTitleStyle
-	descS := selectedDescStyle
-	if !selected {
-		titleS = titleStyle
-		descS = listDescStyle
+func (r *InstanceRenderer) renderProject(project *session.Project, selected bool) string {
+	titleS := titleStyle
+	descS := listDescStyle
+	if selected {
+		titleS = selectedTitleStyle
+		descS = selectedDescStyle
 	}
 
-	// add spinner next to title if it's running
+	caret := "▾"
+	if project.Collapsed {
+		caret = "▸"
+	}
+
+	titleText := fmt.Sprintf("%s %s", caret, project.Name)
+	if runewidth.StringWidth(titleText) > r.width-2 {
+		titleText = runewidth.Truncate(titleText, r.width-5, "...")
+	}
+
+	pathText := project.RootPath
+	if runewidth.StringWidth(pathText) > r.width-2 {
+		pathText = runewidth.Truncate(pathText, r.width-5, "...")
+	}
+
+	return lipgloss.JoinVertical(
+		lipgloss.Left,
+		titleS.Render(titleText),
+		descS.Render(pathText),
+	)
+}
+
+func (r *InstanceRenderer) renderSession(i *session.Instance, selected bool) string {
+	titleS := titleStyle
+	descS := listDescStyle
+	if selected {
+		titleS = selectedTitleStyle
+		descS = selectedDescStyle
+	}
+
 	var join string
 	switch i.Status {
 	case session.Running, session.Loading:
@@ -135,180 +185,91 @@ func (r *InstanceRenderer) Render(i *session.Instance, idx int, selected bool, h
 		join = readyStyle.Render(readyIcon)
 	case session.Paused:
 		join = pausedStyle.Render(pausedIcon)
-	default:
 	}
 
-	// Cut the title if it's too long
-	titleText := i.Title
-	widthAvail := r.width - 3 - runewidth.StringWidth(prefix) - 1
+	titleText := "  " + i.Title
+	widthAvail := r.width - 4
 	if widthAvail > 0 && runewidth.StringWidth(titleText) > widthAvail {
 		titleText = runewidth.Truncate(titleText, widthAvail-3, "...")
 	}
+
 	title := titleS.Render(lipgloss.JoinHorizontal(
 		lipgloss.Left,
-		lipgloss.Place(r.width-3, 1, lipgloss.Left, lipgloss.Center, fmt.Sprintf("%s %s", prefix, titleText)),
+		lipgloss.Place(r.width-3, 1, lipgloss.Left, lipgloss.Center, titleText),
 		" ",
 		join,
 	))
 
-	stat := i.GetDiffStats()
+	location := i.Branch
+	if location == "" {
+		if i.ProjectKind == session.ProjectKindFolder {
+			location = "snapshot workspace"
+		} else {
+			location = "starting..."
+		}
+	}
 
+	stat := i.GetDiffStats()
 	var diff string
-	var addedDiff, removedDiff string
-	if stat == nil || stat.Error != nil || stat.IsEmpty() {
-		// Don't show diff stats if there's an error or if they don't exist
-		addedDiff = ""
-		removedDiff = ""
-		diff = ""
-	} else {
-		addedDiff = fmt.Sprintf("+%d", stat.Added)
-		removedDiff = fmt.Sprintf("-%d ", stat.Removed)
+	if stat != nil && stat.Error == nil && !stat.IsEmpty() {
 		diff = lipgloss.JoinHorizontal(
 			lipgloss.Center,
-			addedLinesStyle.Background(descS.GetBackground()).Render(addedDiff),
+			addedLinesStyle.Background(descS.GetBackground()).Render(fmt.Sprintf("+%d", stat.Added)),
 			lipgloss.Style{}.Background(descS.GetBackground()).Foreground(descS.GetForeground()).Render(","),
-			removedLinesStyle.Background(descS.GetBackground()).Render(removedDiff),
+			removedLinesStyle.Background(descS.GetBackground()).Render(fmt.Sprintf("-%d", stat.Removed)),
 		)
 	}
 
-	remainingWidth := r.width
-	remainingWidth -= runewidth.StringWidth(prefix)
-	remainingWidth -= runewidth.StringWidth(branchIcon)
-	remainingWidth -= 2 // for the literal " " and "-" in the branchLine format string
-
-	diffWidth := runewidth.StringWidth(addedDiff) + runewidth.StringWidth(removedDiff)
-	if diffWidth > 0 {
-		diffWidth += 1
+	line := "  " + location
+	if diff != "" {
+		line += "  " + diff
+	}
+	if runewidth.StringWidth(line) > r.width-2 {
+		line = runewidth.Truncate(line, r.width-5, "...")
 	}
 
-	// Use fixed width for diff stats to avoid layout issues
-	remainingWidth -= diffWidth
-
-	branch := i.Branch
-	if i.Started() && hasMultipleRepos {
-		repoName, err := i.RepoName()
-		if err != nil {
-			log.ErrorLog.Printf("could not get repo name in instance renderer: %v", err)
-		} else {
-			branch += fmt.Sprintf(" (%s)", repoName)
-		}
-	}
-	// Don't show branch if there's no space for it. Or show ellipsis if it's too long.
-	branchWidth := runewidth.StringWidth(branch)
-	if remainingWidth < 0 {
-		branch = ""
-	} else if remainingWidth < branchWidth {
-		if remainingWidth < 3 {
-			branch = ""
-		} else {
-			// We know the remainingWidth is at least 4 and branch is longer than that, so this is safe.
-			branch = runewidth.Truncate(branch, remainingWidth-3, "...")
-		}
-	}
-	remainingWidth -= runewidth.StringWidth(branch)
-
-	// Add spaces to fill the remaining width.
-	spaces := ""
-	if remainingWidth > 0 {
-		spaces = strings.Repeat(" ", remainingWidth)
-	}
-
-	branchLine := fmt.Sprintf("%s %s-%s%s%s", strings.Repeat(" ", len(prefix)), branchIcon, branch, spaces, diff)
-
-	// join title and subtitle
-	text := lipgloss.JoinVertical(
+	return lipgloss.JoinVertical(
 		lipgloss.Left,
 		title,
-		descS.Render(branchLine),
+		descS.Render(line),
 	)
-
-	return text
 }
 
 func (l *List) String() string {
-	const titleText = " Instances "
+	const titleText = " Projects "
 	const autoYesText = " auto-yes "
 
-	// Write the title.
 	var b strings.Builder
-	b.WriteString("\n")
-	b.WriteString("\n")
+	b.WriteString("\n\n")
 
-	// Write title line
-	// add padding of 2 because the border on list items adds some extra characters
 	titleWidth := AdjustPreviewWidth(l.width) + 2
 	if !l.autoyes {
-		b.WriteString(lipgloss.Place(
-			titleWidth, 1, lipgloss.Left, lipgloss.Bottom, mainTitle.Render(titleText)))
+		b.WriteString(lipgloss.Place(titleWidth, 1, lipgloss.Left, lipgloss.Bottom, mainTitle.Render(titleText)))
 	} else {
-		title := lipgloss.Place(
-			titleWidth/2, 1, lipgloss.Left, lipgloss.Bottom, mainTitle.Render(titleText))
-		autoYes := lipgloss.Place(
-			titleWidth-(titleWidth/2), 1, lipgloss.Right, lipgloss.Bottom, autoYesStyle.Render(autoYesText))
-		b.WriteString(lipgloss.JoinHorizontal(
-			lipgloss.Top, title, autoYes))
+		title := lipgloss.Place(titleWidth/2, 1, lipgloss.Left, lipgloss.Bottom, mainTitle.Render(titleText))
+		autoYes := lipgloss.Place(titleWidth-(titleWidth/2), 1, lipgloss.Right, lipgloss.Bottom, autoYesStyle.Render(autoYesText))
+		b.WriteString(lipgloss.JoinHorizontal(lipgloss.Top, title, autoYes))
 	}
 
-	b.WriteString("\n")
-	b.WriteString("\n")
+	b.WriteString("\n\n")
 
-	// Render the list.
-	for i, item := range l.items {
-		b.WriteString(l.renderer.Render(item, i+1, i == l.selectedIdx, len(l.repos) > 1))
-		if i != len(l.items)-1 {
+	for i, row := range l.rows {
+		switch row.kind {
+		case rowProject:
+			b.WriteString(l.renderer.renderProject(row.project, i == l.selectedIdx))
+		case rowSession:
+			b.WriteString(l.renderer.renderSession(row.instance, i == l.selectedIdx))
+		}
+		if i != len(l.rows)-1 {
 			b.WriteString("\n\n")
 		}
 	}
+
 	return lipgloss.Place(l.width, l.height, lipgloss.Left, lipgloss.Top, b.String())
 }
 
-// Down selects the next item in the list.
-func (l *List) Down() {
-	if len(l.items) == 0 {
-		return
-	}
-	if l.selectedIdx < len(l.items)-1 {
-		l.selectedIdx++
-	}
-}
-
-// Kill selects the next item in the list.
-func (l *List) Kill() {
-	if len(l.items) == 0 {
-		return
-	}
-	targetInstance := l.items[l.selectedIdx]
-
-	// Kill the tmux session
-	if err := targetInstance.Kill(); err != nil {
-		log.ErrorLog.Printf("could not kill instance: %v", err)
-	}
-
-	// If you delete the last one in the list, select the previous one.
-	if l.selectedIdx == len(l.items)-1 {
-		defer l.Up()
-	}
-
-	// Unregister the reponame.
-	repoName, err := targetInstance.RepoName()
-	if err != nil {
-		log.ErrorLog.Printf("could not get repo name: %v", err)
-	} else {
-		l.rmRepo(repoName)
-	}
-
-	// Since there's items after this, the selectedIdx can stay the same.
-	l.items = append(l.items[:l.selectedIdx], l.items[l.selectedIdx+1:]...)
-}
-
-func (l *List) Attach() (chan struct{}, error) {
-	targetInstance := l.items[l.selectedIdx]
-	return targetInstance.Attach()
-}
-
-// Up selects the prev item in the list.
 func (l *List) Up() {
-	if len(l.items) == 0 {
+	if len(l.rows) == 0 {
 		return
 	}
 	if l.selectedIdx > 0 {
@@ -316,68 +277,229 @@ func (l *List) Up() {
 	}
 }
 
-func (l *List) addRepo(repo string) {
-	if _, ok := l.repos[repo]; !ok {
-		l.repos[repo] = 0
-	}
-	l.repos[repo]++
-}
-
-func (l *List) rmRepo(repo string) {
-	if _, ok := l.repos[repo]; !ok {
-		log.ErrorLog.Printf("repo %s not found", repo)
+func (l *List) Down() {
+	if len(l.rows) == 0 {
 		return
 	}
-	l.repos[repo]--
-	if l.repos[repo] == 0 {
-		delete(l.repos, repo)
+	if l.selectedIdx < len(l.rows)-1 {
+		l.selectedIdx++
 	}
 }
 
-// AddInstance adds a new instance to the list. It returns a finalizer function that should be called when the instance
-// is started. If the instance was restored from storage or is paused, you can call the finalizer immediately.
-// When creating a new one and entering the name, you want to call the finalizer once the name is done.
-func (l *List) AddInstance(instance *session.Instance) (finalize func()) {
-	l.items = append(l.items, instance)
-	// The finalizer registers the repo name once the instance is started.
-	return func() {
-		repoName, err := instance.RepoName()
-		if err != nil {
-			log.ErrorLog.Printf("could not get repo name: %v", err)
-			return
-		}
-
-		l.addRepo(repoName)
-	}
-}
-
-// GetSelectedInstance returns the currently selected instance
-func (l *List) GetSelectedInstance() *session.Instance {
-	if len(l.items) == 0 {
+func (l *List) ToggleSelectedProjectCollapsed() *session.Project {
+	row := l.getSelectedRow()
+	if row == nil || row.project == nil || row.kind != rowProject {
 		return nil
 	}
-	return l.items[l.selectedIdx]
+	row.project.Collapsed = !row.project.Collapsed
+	l.rebuildRows()
+	l.SelectProject(row.project)
+	return row.project
 }
 
-// SetSelectedInstance sets the selected index. Noop if the index is out of bounds.
-func (l *List) SetSelectedInstance(idx int) {
-	if idx >= len(l.items) {
+func (l *List) AddProject(project *session.Project) {
+	l.projects = append(l.projects, project)
+	l.rebuildRows()
+	l.SelectProject(project)
+}
+
+func (l *List) RemoveProject(projectID string) *session.Project {
+	for i, project := range l.projects {
+		if project.ID != projectID {
+			continue
+		}
+		l.projects = append(l.projects[:i], l.projects[i+1:]...)
+		l.rebuildRows()
+		if l.selectedIdx >= len(l.rows) && len(l.rows) > 0 {
+			l.selectedIdx = len(l.rows) - 1
+		}
+		return project
+	}
+	return nil
+}
+
+// AddSession adds an instance beneath the given project and returns a compatibility no-op finalizer.
+func (l *List) AddSession(projectID string, instance *session.Instance) func() {
+	for _, project := range l.projects {
+		if project.ID != projectID {
+			continue
+		}
+		project.AddSession(instance)
+		l.rebuildRows()
+		l.SelectInstance(instance)
+		return func() {}
+	}
+	return func() {}
+}
+
+// AddInstance is kept for compatibility with older tests.
+func (l *List) AddInstance(instance *session.Instance) func() {
+	project := &session.Project{
+		ID:        newCompatProjectID(instance),
+		Name:      filepathBase(instance.Path),
+		RootPath:  instance.Path,
+		Kind:      instance.ProjectKind,
+		Sessions:  []*session.Instance{},
+	}
+	l.AddProject(project)
+	return l.AddSession(project.ID, instance)
+}
+
+func newCompatProjectID(instance *session.Instance) string {
+	if instance.ProjectID != "" {
+		return instance.ProjectID
+	}
+	return "compat-" + instance.ID
+}
+
+func filepathBase(path string) string {
+	path = strings.TrimRight(path, string(filepath.Separator))
+	if path == "" {
+		return "project"
+	}
+	parts := strings.Split(path, string(filepath.Separator))
+	return parts[len(parts)-1]
+}
+
+func (l *List) RemoveSession(instanceID string) *session.Instance {
+	for _, project := range l.projects {
+		if instance := project.RemoveSession(instanceID); instance != nil {
+			l.rebuildRows()
+			if l.selectedIdx >= len(l.rows) && len(l.rows) > 0 {
+				l.selectedIdx = len(l.rows) - 1
+			}
+			return instance
+		}
+	}
+	return nil
+}
+
+func (l *List) Kill() {
+	selected := l.GetSelectedInstance()
+	if selected == nil {
 		return
 	}
-	l.selectedIdx = idx
+	if err := selected.Kill(); err == nil {
+		l.RemoveSession(selected.ID)
+	}
 }
 
-// SelectInstance finds and selects the given instance in the list.
+func (l *List) Attach() (chan struct{}, error) {
+	target := l.GetSelectedInstance()
+	if target == nil {
+		return nil, fmt.Errorf("no session selected")
+	}
+	return target.Attach()
+}
+
+func (l *List) GetSelectedInstance() *session.Instance {
+	row := l.getSelectedRow()
+	if row == nil || row.kind != rowSession {
+		return nil
+	}
+	return row.instance
+}
+
+func (l *List) GetSelectedProject() *session.Project {
+	row := l.getSelectedRow()
+	if row == nil {
+		return nil
+	}
+	return row.project
+}
+
+func (l *List) IsProjectSelected() bool {
+	row := l.getSelectedRow()
+	return row != nil && row.kind == rowProject
+}
+
+func (l *List) GetSelection() Selection {
+	return Selection{
+		Project:  l.GetSelectedProject(),
+		Instance: l.GetSelectedInstance(),
+	}
+}
+
+func (l *List) SetSelectedInstance(idx int) {
+	sessionIdx := 0
+	for rowIdx, row := range l.rows {
+		if row.kind != rowSession {
+			continue
+		}
+		if sessionIdx == idx {
+			l.selectedIdx = rowIdx
+			return
+		}
+		sessionIdx++
+	}
+}
+
 func (l *List) SelectInstance(target *session.Instance) {
-	for i, inst := range l.items {
-		if inst == target {
-			l.SetSelectedInstance(i)
+	for i, row := range l.rows {
+		if row.instance == target {
+			l.selectedIdx = i
 			return
 		}
 	}
 }
 
-// GetInstances returns all instances in the list
+func (l *List) SelectProject(target *session.Project) {
+	for i, row := range l.rows {
+		if row.kind == rowProject && row.project == target {
+			l.selectedIdx = i
+			return
+		}
+	}
+}
+
+func (l *List) SelectProjectForPath(path string) {
+	longestMatch := -1
+	var target *session.Project
+	for _, project := range l.projects {
+		if path == project.RootPath || strings.HasPrefix(path, project.RootPath+string(filepath.Separator)) {
+			if len(project.RootPath) > longestMatch {
+				longestMatch = len(project.RootPath)
+				target = project
+			}
+		}
+	}
+	if target != nil {
+		l.SelectProject(target)
+		return
+	}
+	if len(l.rows) > 0 {
+		l.selectedIdx = 0
+	}
+}
+
 func (l *List) GetInstances() []*session.Instance {
-	return l.items
+	instances := make([]*session.Instance, 0, l.NumSessions())
+	for _, project := range l.projects {
+		instances = append(instances, project.Sessions...)
+	}
+	return instances
+}
+
+func (l *List) rebuildRows() {
+	rows := make([]listRow, 0)
+	for _, project := range l.projects {
+		rows = append(rows, listRow{kind: rowProject, project: project})
+		if project.Collapsed {
+			continue
+		}
+		for _, instance := range project.Sessions {
+			rows = append(rows, listRow{kind: rowSession, project: project, instance: instance})
+		}
+	}
+	l.rows = rows
+	if l.selectedIdx >= len(l.rows) && len(l.rows) > 0 {
+		l.selectedIdx = len(l.rows) - 1
+	}
+}
+
+func (l *List) getSelectedRow() *listRow {
+	if len(l.rows) == 0 || l.selectedIdx < 0 || l.selectedIdx >= len(l.rows) {
+		return nil
+	}
+	return &l.rows[l.selectedIdx]
 }

@@ -137,7 +137,7 @@ func TestTerminalUpdateContent(t *testing.T) {
 	injectSession(tp, instance.Title, ts, t.TempDir())
 
 	// UpdateContent should set fallback=false and capture content
-	err := tp.UpdateContent(instance)
+	err := tp.UpdateContent(nil, instance)
 	require.NoError(t, err)
 
 	tp.mu.Lock()
@@ -158,14 +158,14 @@ func TestTerminalFallbackStates(t *testing.T) {
 	tp.SetSize(80, 30)
 
 	t.Run("nil instance", func(t *testing.T) {
-		err := tp.UpdateContent(nil)
+		err := tp.UpdateContent(nil, nil)
 		require.NoError(t, err)
 
 		tp.mu.Lock()
+		defer tp.mu.Unlock()
 		require.True(t, tp.fallback, "should be in fallback mode for nil instance")
-		require.Contains(t, tp.fallbackText, "Select an instance", "fallback text should prompt to select instance")
+		require.Contains(t, tp.fallbackText, "Add a project", "fallback text should prompt to add a project")
 		require.Empty(t, tp.content, "content should be empty in fallback mode")
-		tp.mu.Unlock()
 	})
 
 	t.Run("paused instance", func(t *testing.T) {
@@ -179,13 +179,13 @@ func TestTerminalFallbackStates(t *testing.T) {
 		require.NoError(t, err)
 		instance.SetStatus(session.Paused)
 
-		err = tp.UpdateContent(instance)
+		err = tp.UpdateContent(nil, instance)
 		require.NoError(t, err)
 
 		tp.mu.Lock()
+		defer tp.mu.Unlock()
 		require.True(t, tp.fallback, "should be in fallback mode for paused instance")
 		require.Contains(t, tp.fallbackText, "paused", "fallback text should mention paused")
-		tp.mu.Unlock()
 	})
 
 	t.Run("not started instance", func(t *testing.T) {
@@ -197,13 +197,13 @@ func TestTerminalFallbackStates(t *testing.T) {
 		})
 		require.NoError(t, err)
 
-		err = tp.UpdateContent(instance)
+		err = tp.UpdateContent(nil, instance)
 		require.NoError(t, err)
 
 		tp.mu.Lock()
+		defer tp.mu.Unlock()
 		require.True(t, tp.fallback, "should be in fallback mode for not-started instance")
 		require.Contains(t, tp.fallbackText, "not started", "fallback text should indicate not started")
-		tp.mu.Unlock()
 	})
 }
 
@@ -242,7 +242,7 @@ func TestTerminalSessionCaching(t *testing.T) {
 	tp.currentTitle = instance1.Title
 	tp.mu.Unlock()
 
-	err := tp.UpdateContent(instance1)
+	err := tp.UpdateContent(nil, instance1)
 	require.NoError(t, err)
 	tp.mu.Lock()
 	require.Equal(t, content1, tp.content)
@@ -253,7 +253,7 @@ func TestTerminalSessionCaching(t *testing.T) {
 	tp.currentTitle = instance2.Title
 	tp.mu.Unlock()
 
-	err = tp.UpdateContent(instance2)
+	err = tp.UpdateContent(nil, instance2)
 	require.NoError(t, err)
 	tp.mu.Lock()
 	require.Equal(t, content2, tp.content)
@@ -264,7 +264,7 @@ func TestTerminalSessionCaching(t *testing.T) {
 	tp.currentTitle = instance1.Title
 	tp.mu.Unlock()
 
-	err = tp.UpdateContent(instance1)
+	err = tp.UpdateContent(nil, instance1)
 	require.NoError(t, err)
 	tp.mu.Lock()
 	require.Equal(t, content1, tp.content, "should get cached session content when switching back")

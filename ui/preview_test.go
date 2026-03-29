@@ -229,7 +229,7 @@ func TestPreviewScrolling(t *testing.T) {
 	previewPane.SetSize(80, 30) // Set reasonable size for testing
 
 	// Step 1: Check initial content - should show normal preview mode
-	err = previewPane.UpdateContent(setup.instance)
+	err = previewPane.UpdateContent(nil, setup.instance)
 	require.NoError(t, err)
 
 	// Verify we're not in scrolling mode initially
@@ -298,7 +298,7 @@ func TestPreviewShowsRestartFallbackForStoppedSession(t *testing.T) {
 	previewPane := NewPreviewPane()
 	previewPane.SetSize(80, 30)
 
-	err := previewPane.UpdateContent(instance)
+	err := previewPane.UpdateContent(nil, instance)
 	require.NoError(t, err)
 	require.True(t, previewPane.previewState.fallback)
 	require.Contains(t, previewPane.previewState.text, "Press 'r' to restart")
@@ -382,7 +382,7 @@ func TestPreviewContentWithoutScrolling(t *testing.T) {
 	previewPane.SetSize(80, 30) // Set reasonable size for testing
 
 	// Update the preview content (this should display the content without scrolling)
-	err := previewPane.UpdateContent(setup.instance)
+	err := previewPane.UpdateContent(nil, setup.instance)
 	require.NoError(t, err)
 
 	// Verify we're not in scrolling mode

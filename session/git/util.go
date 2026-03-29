@@ -62,3 +62,7 @@ func findGitRepoRoot(path string) (string, error) {
 	}
 	return strings.TrimSpace(string(out)), nil
 }
+
+func FindRepoRoot(path string) (string, error) {
+	return findGitRepoRoot(path)
+}

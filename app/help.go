@@ -37,20 +37,21 @@ func (h helpTypeGeneral) toContent() string {
 	content := lipgloss.JoinVertical(lipgloss.Left,
 		titleStyle.Render("Claude Squad"),
 		"",
-		"A terminal UI that manages multiple Claude Code (and other local agents) in separate workspaces.",
+		"A terminal UI that manages multiple local agents across grouped projects and isolated workspaces.",
 		"",
-		headerStyle.Render("Managing:"),
-		keyStyle.Render("n")+descStyle.Render("         - Create a new session and choose a provider"),
-		keyStyle.Render("N")+descStyle.Render("         - Create a prompted session and choose a provider"),
-		keyStyle.Render("D")+descStyle.Render("         - Kill (delete) the selected session"),
-		keyStyle.Render("↑/j, ↓/k")+descStyle.Render("  - Navigate between sessions"),
-		keyStyle.Render("↵/o")+descStyle.Render("       - Attach to the selected session"),
-		keyStyle.Render("ctrl-q")+descStyle.Render("    - Detach from session"),
+		headerStyle.Render("Projects:"),
+		keyStyle.Render("a")+descStyle.Render("         - Add a project folder"),
+		keyStyle.Render("↑/j, ↓/k")+descStyle.Render("  - Navigate between projects and sessions"),
+		keyStyle.Render("↵/o")+descStyle.Render("       - Expand/collapse a project or attach to a session"),
+		keyStyle.Render("D")+descStyle.Render("         - Delete the selected session or empty project"),
 		"",
-		headerStyle.Render("Handoff:"),
-		keyStyle.Render("p")+descStyle.Render("         - Commit and push branch to github"),
-		keyStyle.Render("c")+descStyle.Render("         - Checkout: commit changes and pause session"),
-		keyStyle.Render("r")+descStyle.Render("         - Resume a paused session or restart a stopped one"),
+		headerStyle.Render("Sessions:"),
+		keyStyle.Render("n")+descStyle.Render("         - Create a new session in the selected project"),
+		keyStyle.Render("N")+descStyle.Render("         - Create a new prompted session in the selected project"),
+		keyStyle.Render("c")+descStyle.Render("         - Pause the selected session"),
+		keyStyle.Render("r")+descStyle.Render("         - Resume a paused session"),
+		keyStyle.Render("p")+descStyle.Render("         - Push the selected Git-backed session"),
+		keyStyle.Render("ctrl-q")+descStyle.Render("    - Detach from an attached session"),
 		"",
 		headerStyle.Render("Other:"),
 		keyStyle.Render("tab")+descStyle.Render("       - Switch between preview, diff, and terminal tabs"),
@@ -61,14 +62,20 @@ func (h helpTypeGeneral) toContent() string {
 }
 
 func (h helpTypeInstanceStart) toContent() string {
+	workspaceLine := descStyle.Render(fmt.Sprintf("• %s running in background tmux session",
+		lipgloss.NewStyle().Bold(true).Render(h.instance.Program)))
+	refLine := descStyle.Render("• Managed workspace snapshot")
+	if h.instance.SupportsPush() {
+		refLine = descStyle.Render(fmt.Sprintf("• Git branch: %s",
+			lipgloss.NewStyle().Bold(true).Render(h.instance.Branch)))
+	}
+
 	content := lipgloss.JoinVertical(lipgloss.Left,
 		titleStyle.Render("Instance Created"),
 		"",
 		descStyle.Render("New session created:"),
-		descStyle.Render(fmt.Sprintf("• Git branch: %s (isolated worktree)",
-			lipgloss.NewStyle().Bold(true).Render(h.instance.Branch))),
-		descStyle.Render(fmt.Sprintf("• Provider: %s running in background tmux session",
-			lipgloss.NewStyle().Bold(true).Render(h.instance.Program))),
+		refLine,
+		workspaceLine,
 		"",
 		headerStyle.Render("Managing:"),
 		keyStyle.Render("↵/o")+descStyle.Render("   - Attach to the session to interact with it directly"),
@@ -76,8 +83,8 @@ func (h helpTypeInstanceStart) toContent() string {
 		keyStyle.Render("D")+descStyle.Render("     - Kill (delete) the selected session"),
 		"",
 		headerStyle.Render("Handoff:"),
-		keyStyle.Render("c")+descStyle.Render("     - Checkout this instance's branch"),
-		keyStyle.Render("p")+descStyle.Render("     - Push branch to GitHub to create a PR"),
+		keyStyle.Render("c")+descStyle.Render("     - Pause this instance"),
+		keyStyle.Render("p")+descStyle.Render("     - Push a Git-backed session to GitHub"),
 	)
 	return content
 }
@@ -93,15 +100,15 @@ func (h helpTypeInstanceAttach) toContent() string {
 
 func (h helpTypeInstanceCheckout) toContent() string {
 	content := lipgloss.JoinVertical(lipgloss.Left,
-		titleStyle.Render("Checkout Instance"),
+		titleStyle.Render("Pause Session"),
 		"",
-		"Changes will be committed locally. The branch name has been copied to your clipboard for you to checkout.",
+		"Changes will be committed locally before the session is paused.",
 		"",
-		"Feel free to make changes to the branch and commit them. When resuming, the session will continue from where you left off.",
+		"When resuming, the session will continue from where you left off in its managed workspace.",
 		"",
 		headerStyle.Render("Commands:"),
-		keyStyle.Render("c")+descStyle.Render(" - Checkout: commit changes locally and pause session"),
-		keyStyle.Render("r")+descStyle.Render(" - Resume a paused session or restart a stopped one"),
+		keyStyle.Render("c")+descStyle.Render(" - Pause the session"),
+		keyStyle.Render("r")+descStyle.Render(" - Resume a paused session"),
 	)
 	return content
 }

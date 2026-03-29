@@ -13,14 +13,17 @@ const (
 	InstancesFileName = "instances.json"
 )
 
-// InstanceStorage handles instance-related operations
-type InstanceStorage interface {
-	// SaveInstances saves the raw instance data
+// ProjectStorage handles project-related operations.
+type ProjectStorage interface {
+	SaveProjects(projectsJSON json.RawMessage) error
+	GetProjects() json.RawMessage
+	DeleteAllProjects() error
+}
+
+// LegacyInstanceStorage exposes the old flat instance payload for migration.
+type LegacyInstanceStorage interface {
 	SaveInstances(instancesJSON json.RawMessage) error
-	// GetInstances returns the raw instance data
 	GetInstances() json.RawMessage
-	// DeleteAllInstances removes all stored instances
-	DeleteAllInstances() error
 }
 
 // AppState handles application-level state
@@ -33,7 +36,8 @@ type AppState interface {
 
 // StateManager combines instance storage and app state management
 type StateManager interface {
-	InstanceStorage
+	ProjectStorage
+	LegacyInstanceStorage
 	AppState
 }
 
@@ -43,6 +47,8 @@ type State struct {
 	HelpScreensSeen uint32 `json:"help_screens_seen"`
 	// Instances stores the serialized instance data as raw JSON
 	InstancesData json.RawMessage `json:"instances"`
+	// Projects stores the serialized project data as raw JSON
+	ProjectsData json.RawMessage `json:"projects"`
 }
 
 // DefaultState returns the default state
@@ -50,6 +56,7 @@ func DefaultState() *State {
 	return &State{
 		HelpScreensSeen: 0,
 		InstancesData:   json.RawMessage("[]"),
+		ProjectsData:    json.RawMessage("[]"),
 	}
 }
 
@@ -106,7 +113,25 @@ func SaveState(state *State) error {
 	return os.WriteFile(statePath, data, 0644)
 }
 
-// InstanceStorage interface implementation
+// ProjectStorage interface implementation
+
+func (s *State) SaveProjects(projectsJSON json.RawMessage) error {
+	s.ProjectsData = projectsJSON
+	s.InstancesData = json.RawMessage("[]")
+	return SaveState(s)
+}
+
+func (s *State) GetProjects() json.RawMessage {
+	return s.ProjectsData
+}
+
+func (s *State) DeleteAllProjects() error {
+	s.ProjectsData = json.RawMessage("[]")
+	s.InstancesData = json.RawMessage("[]")
+	return SaveState(s)
+}
+
+// LegacyInstanceStorage interface implementation
 
 // SaveInstances saves the raw instance data
 func (s *State) SaveInstances(instancesJSON json.RawMessage) error {

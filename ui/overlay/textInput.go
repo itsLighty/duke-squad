@@ -78,7 +78,7 @@ func NewTextInputOverlayWithBranchPicker(title string, initialValue string, prof
 // NewSessionCreateOverlay creates a form for creating a new session. The form always
 // captures a title and provider. When includePrompt is true, it also captures an initial
 // prompt and branch selection.
-func NewSessionCreateOverlay(title string, profiles []config.Profile, selectedProfile int, includePrompt bool) *TextInputOverlay {
+func NewSessionCreateOverlay(title string, profiles []config.Profile, selectedProfile int, includePrompt bool, withBranchPicker bool) *TextInputOverlay {
 	overlay := &TextInputOverlay{
 		titleInput:    newTitleInput(),
 		Title:         title,
@@ -88,7 +88,9 @@ func NewSessionCreateOverlay(title string, profiles []config.Profile, selectedPr
 	}
 	if includePrompt {
 		overlay.promptInput = newPromptInput("")
-		overlay.branchPicker = NewBranchPicker()
+		if withBranchPicker {
+			overlay.branchPicker = NewBranchPicker()
+		}
 	}
 	overlay.updateFocusState()
 	return overlay

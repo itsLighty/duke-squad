@@ -13,7 +13,7 @@ func TestNewSessionCreateOverlayWithoutPromptIncludesProviderChoice(t *testing.T
 	overlay := NewSessionCreateOverlay("", []config.Profile{
 		{Name: "Claude", Program: "claude"},
 		{Name: "Codex", Program: "codex"},
-	}, 0, false)
+	}, 0, false, false)
 
 	assert.True(t, overlay.hasTitleInput)
 	assert.False(t, overlay.hasPrompt)
@@ -26,7 +26,7 @@ func TestNewSessionCreateOverlayWithPromptIncludesPromptAndBranchPicker(t *testi
 	overlay := NewSessionCreateOverlay("Initial prompt", []config.Profile{
 		{Name: "Claude", Program: "claude"},
 		{Name: "Codex", Program: "codex"},
-	}, 1, true)
+	}, 1, true, true)
 
 	assert.True(t, overlay.hasPrompt)
 	require.NotNil(t, overlay.branchPicker)
@@ -38,7 +38,7 @@ func TestSessionCreateOverlayCanSwitchProviderFromOverrideSelection(t *testing.T
 	overlay := NewSessionCreateOverlay("", []config.Profile{
 		{Name: "Claude", Program: "claude"},
 		{Name: "Codex", Program: "codex"},
-	}, 1, false)
+	}, 1, false, false)
 
 	overlay.setFocusIndex(overlay.profilePickerIndex())
 	closed, branchChanged := overlay.HandleKeyPress(tea.KeyMsg{Type: tea.KeyLeft})
@@ -52,7 +52,7 @@ func TestSessionCreateOverlayTabsToProviderWhenMultipleProvidersExist(t *testing
 	overlay := NewSessionCreateOverlay("", []config.Profile{
 		{Name: "Claude", Program: "claude"},
 		{Name: "Codex", Program: "codex"},
-	}, 0, false)
+	}, 0, false, false)
 
 	closed, branchChanged := overlay.HandleKeyPress(tea.KeyMsg{Type: tea.KeyTab})
 

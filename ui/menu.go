@@ -47,13 +47,15 @@ type Menu struct {
 	height, width int
 	state         MenuState
 	instance      *session.Instance
+	project       *session.Project
+	projectRow    bool
 	activeTab     int
 
 	// keyDown is the key which is pressed. The default is -1.
 	keyDown keys.KeyName
 }
 
-var defaultMenuOptions = []keys.KeyName{keys.KeyNew, keys.KeyPrompt, keys.KeyHelp, keys.KeyQuit}
+var defaultMenuOptions = []keys.KeyName{keys.KeyAddProject, keys.KeyNew, keys.KeyPrompt, keys.KeyHelp, keys.KeyQuit}
 var newInstanceMenuOptions = []keys.KeyName{keys.KeySubmitName}
 var promptMenuOptions = []keys.KeyName{keys.KeySubmitName}
 
@@ -94,6 +96,12 @@ func (m *Menu) SetInstance(instance *session.Instance) {
 	m.updateOptions()
 }
 
+func (m *Menu) SetProject(project *session.Project, projectRow bool) {
+	m.project = project
+	m.projectRow = projectRow
+	m.updateOptions()
+}
+
 // SetActiveTab updates the currently active tab
 func (m *Menu) SetActiveTab(tab int) {
 	m.activeTab = tab
@@ -106,7 +114,7 @@ func (m *Menu) updateOptions() {
 	case StateEmpty:
 		m.options = defaultMenuOptions
 	case StateDefault:
-		if m.instance != nil {
+		if m.instance != nil || m.project != nil {
 			// When there is an instance, show that instance's options
 			m.addInstanceOptions()
 		} else {
@@ -123,15 +131,28 @@ func (m *Menu) updateOptions() {
 func (m *Menu) addInstanceOptions() {
 	// Loading instances only get minimal options
 	if m.instance != nil && m.instance.Status == session.Loading {
-		m.options = []keys.KeyName{keys.KeyNew, keys.KeyHelp, keys.KeyQuit}
+		m.options = []keys.KeyName{keys.KeyAddProject, keys.KeyNew, keys.KeyHelp, keys.KeyQuit}
+		return
+	}
+
+	if m.instance == nil && m.project != nil {
+		options := []keys.KeyName{keys.KeyAddProject, keys.KeyNew, keys.KeyPrompt}
+		if m.projectRow && len(m.project.Sessions) == 0 {
+			options = append(options, keys.KeyKill)
+		}
+		options = append(options, keys.KeyTab, keys.KeyHelp, keys.KeyQuit)
+		m.options = options
 		return
 	}
 
 	// Instance management group
-	options := []keys.KeyName{keys.KeyNew, keys.KeyKill}
+	options := []keys.KeyName{keys.KeyAddProject, keys.KeyNew, keys.KeyKill}
 
 	// Action group
-	actionGroup := []keys.KeyName{keys.KeyEnter, keys.KeySubmit}
+	actionGroup := []keys.KeyName{keys.KeyEnter}
+	if m.instance.SupportsPush() {
+		actionGroup = append(actionGroup, keys.KeySubmit)
+	}
 	if m.instance.Status == session.Paused || !m.instance.TmuxAlive() {
 		actionGroup = append(actionGroup, keys.KeyResume)
 	} else {
@@ -162,16 +183,6 @@ func (m *Menu) SetSize(width, height int) {
 func (m *Menu) String() string {
 	var s strings.Builder
 
-	// Define group boundaries
-	groups := []struct {
-		start int
-		end   int
-	}{
-		{0, 2}, // Instance management group (n, d)
-		{2, 5}, // Action group (enter, submit, pause/resume)
-		{6, 8}, // System group (tab, help, q)
-	}
-
 	for i, k := range m.options {
 		binding := keys.GlobalkeyBindings[k]
 
@@ -186,15 +197,7 @@ func (m *Menu) String() string {
 			localDescStyle = localDescStyle.Underline(true)
 		}
 
-		var inActionGroup bool
-		switch m.state {
-		case StateEmpty:
-			// For empty state, the action group is the first group
-			inActionGroup = i <= 1
-		default:
-			// For other states, the action group is the second group
-			inActionGroup = i >= groups[1].start && i < groups[1].end
-		}
+		inActionGroup := k == keys.KeyEnter || k == keys.KeySubmit || k == keys.KeyCheckout || k == keys.KeyResume
 
 		if inActionGroup {
 			s.WriteString(localActionStyle.Render(binding.Help().Key))
@@ -208,15 +211,11 @@ func (m *Menu) String() string {
 
 		// Add appropriate separator
 		if i != len(m.options)-1 {
-			isGroupEnd := false
-			for _, group := range groups {
-				if i == group.end-1 {
-					s.WriteString(sepStyle.Render(verticalSeparator))
-					isGroupEnd = true
-					break
-				}
-			}
-			if !isGroupEnd {
+			next := m.options[i+1]
+			if (k == keys.KeyKill || k == keys.KeyPrompt || k == keys.KeyResume || k == keys.KeyCheckout || k == keys.KeySubmit) &&
+				next != keys.KeyEnter && next != keys.KeySubmit && next != keys.KeyCheckout && next != keys.KeyResume {
+				s.WriteString(sepStyle.Render(verticalSeparator))
+			} else {
 				s.WriteString(sepStyle.Render(separator))
 			}
 		}

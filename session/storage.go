@@ -4,27 +4,33 @@ import (
 	"claude-squad/config"
 	"encoding/json"
 	"fmt"
+	"path/filepath"
 	"time"
 )
 
-// InstanceData represents the serializable data of an Instance
+// InstanceData represents the serializable data of an Instance.
 type InstanceData struct {
-	Title     string    `json:"title"`
-	Path      string    `json:"path"`
-	Branch    string    `json:"branch"`
-	Status    Status    `json:"status"`
-	Height    int       `json:"height"`
-	Width     int       `json:"width"`
-	CreatedAt time.Time `json:"created_at"`
-	UpdatedAt time.Time `json:"updated_at"`
-	AutoYes   bool      `json:"auto_yes"`
+	ID          string        `json:"id"`
+	ProjectID   string        `json:"project_id"`
+	ProjectKind ProjectKind   `json:"project_kind"`
+	Title       string        `json:"title"`
+	Path        string        `json:"path"`
+	Branch      string        `json:"branch"`
+	Status      Status        `json:"status"`
+	Height      int           `json:"height"`
+	Width       int           `json:"width"`
+	CreatedAt   time.Time     `json:"created_at"`
+	UpdatedAt   time.Time     `json:"updated_at"`
+	AutoYes     bool          `json:"auto_yes"`
+	Program     string        `json:"program"`
+	Workspace   WorkspaceData `json:"workspace"`
 
-	Program   string          `json:"program"`
+	// Worktree is retained for one-shot migration from the legacy storage shape.
 	Worktree  GitWorktreeData `json:"worktree"`
 	DiffStats DiffStatsData   `json:"diff_stats"`
 }
 
-// GitWorktreeData represents the serializable data of a GitWorktree
+// GitWorktreeData represents the legacy serializable data of a GitWorktree.
 type GitWorktreeData struct {
 	RepoPath         string `json:"repo_path"`
 	WorktreePath     string `json:"worktree_path"`
@@ -34,126 +40,221 @@ type GitWorktreeData struct {
 	IsExistingBranch bool   `json:"is_existing_branch"`
 }
 
-// DiffStatsData represents the serializable data of a DiffStats
+// DiffStatsData represents the serializable data of a DiffStats.
 type DiffStatsData struct {
 	Added   int    `json:"added"`
 	Removed int    `json:"removed"`
 	Content string `json:"content"`
 }
 
-// Storage handles saving and loading instances using the state interface
+// Storage handles saving and loading projects using the state interface.
 type Storage struct {
-	state config.InstanceStorage
+	state config.StateManager
 }
 
-// NewStorage creates a new storage instance
-func NewStorage(state config.InstanceStorage) (*Storage, error) {
-	return &Storage{
-		state: state,
-	}, nil
+func NewStorage(state config.StateManager) (*Storage, error) {
+	return &Storage{state: state}, nil
 }
 
-// SaveInstances saves the list of instances to disk
-func (s *Storage) SaveInstances(instances []*Instance) error {
-	// Convert instances to InstanceData
-	data := make([]InstanceData, 0)
-	for _, instance := range instances {
-		if instance.Started() {
-			data = append(data, instance.ToInstanceData())
-		}
+func (s *Storage) SaveProjects(projects []*Project) error {
+	data := make([]ProjectData, 0, len(projects))
+	for _, project := range projects {
+		data = append(data, project.ToProjectData())
 	}
 
-	// Marshal to JSON
 	jsonData, err := json.Marshal(data)
 	if err != nil {
-		return fmt.Errorf("failed to marshal instances: %w", err)
+		return fmt.Errorf("failed to marshal projects: %w", err)
 	}
-
-	return s.state.SaveInstances(jsonData)
+	return s.state.SaveProjects(jsonData)
 }
 
-// LoadInstances loads the list of instances from disk
-func (s *Storage) LoadInstances() ([]*Instance, error) {
+func (s *Storage) LoadProjects() ([]*Project, error) {
+	projectJSON := s.state.GetProjects()
+	if len(projectJSON) > 0 && string(projectJSON) != "null" && string(projectJSON) != "[]" {
+		var projectData []ProjectData
+		if err := json.Unmarshal(projectJSON, &projectData); err != nil {
+			return nil, fmt.Errorf("failed to unmarshal projects: %w", err)
+		}
+
+		projects := make([]*Project, 0, len(projectData))
+		for _, data := range projectData {
+			project, err := projectFromData(data)
+			if err != nil {
+				return nil, err
+			}
+			projects = append(projects, project)
+		}
+		return projects, nil
+	}
+
+	projects, migrated, err := s.loadLegacyProjects()
+	if err != nil {
+		return nil, err
+	}
+	if migrated {
+		if err := s.SaveProjects(projects); err != nil {
+			return nil, err
+		}
+	}
+	return projects, nil
+}
+
+func (s *Storage) loadLegacyProjects() ([]*Project, bool, error) {
 	jsonData := s.state.GetInstances()
+	if len(jsonData) == 0 || string(jsonData) == "null" {
+		return []*Project{}, false, nil
+	}
 
 	var instancesData []InstanceData
 	if err := json.Unmarshal(jsonData, &instancesData); err != nil {
-		return nil, fmt.Errorf("failed to unmarshal instances: %w", err)
+		return nil, false, fmt.Errorf("failed to unmarshal legacy instances: %w", err)
+	}
+	if len(instancesData) == 0 {
+		return []*Project{}, false, nil
 	}
 
-	instances := make([]*Instance, len(instancesData))
-	needsNormalizationSave := false
-	for i, data := range instancesData {
+	projectsByPath := make(map[string]*Project)
+	usedNames := make(map[string]int)
+	orderedProjects := make([]*Project, 0)
+
+	for _, data := range instancesData {
+		projectRoot := data.Worktree.RepoPath
+		if projectRoot == "" {
+			projectRoot = data.Path
+		}
+		if projectRoot == "" {
+			continue
+		}
+
+		project, ok := projectsByPath[projectRoot]
+		if !ok {
+			name := uniqueProjectName(filepath.Base(projectRoot), usedNames)
+			project = &Project{
+				ID:        newID("proj_"),
+				Name:      name,
+				RootPath:  projectRoot,
+				Kind:      ProjectKindGit,
+				CreatedAt: time.Now(),
+				UpdatedAt: time.Now(),
+				Sessions:  []*Instance{},
+			}
+			projectsByPath[projectRoot] = project
+			orderedProjects = append(orderedProjects, project)
+		}
+
+		if data.ID == "" {
+			data.ID = newID("sess_")
+		}
+		data.ProjectID = project.ID
+		if data.ProjectKind == "" {
+			data.ProjectKind = ProjectKindGit
+		}
+		if data.Workspace.Type == "" {
+			data.Workspace = WorkspaceData{
+				Type:             ProjectKindGit,
+				RootPath:         data.Worktree.RepoPath,
+				WorkspacePath:    data.Worktree.WorktreePath,
+				BranchName:       data.Worktree.BranchName,
+				BaseCommitSHA:    data.Worktree.BaseCommitSHA,
+				IsExistingBranch: data.Worktree.IsExistingBranch,
+			}
+		}
 		instance, err := FromInstanceData(data)
 		if err != nil {
-			return nil, fmt.Errorf("failed to create instance %s: %w", data.Title, err)
+			return nil, false, err
 		}
-		if instance.Program != data.Program {
-			needsNormalizationSave = true
-		}
-		instances[i] = instance
+		project.Sessions = append(project.Sessions, instance)
 	}
 
-	if needsNormalizationSave {
-		if err := s.SaveInstances(instances); err != nil {
-			return nil, fmt.Errorf("failed to save normalized instances: %w", err)
-		}
-	}
+	return orderedProjects, true, nil
+}
 
+func uniqueProjectName(base string, used map[string]int) string {
+	if base == "" {
+		base = "project"
+	}
+	count := used[base]
+	used[base] = count + 1
+	if count == 0 {
+		return base
+	}
+	return fmt.Sprintf("%s (%d)", base, count+1)
+}
+
+func (s *Storage) DeleteAllProjects() error {
+	return s.state.DeleteAllProjects()
+}
+
+func (s *Storage) DeleteAllInstances() error {
+	return s.DeleteAllProjects()
+}
+
+// LoadInstances flattens the project tree for legacy callers.
+func (s *Storage) LoadInstances() ([]*Instance, error) {
+	projects, err := s.LoadProjects()
+	if err != nil {
+		return nil, err
+	}
+	instances := make([]*Instance, 0)
+	for _, project := range projects {
+		instances = append(instances, project.Sessions...)
+	}
 	return instances, nil
 }
 
-// DeleteInstance removes an instance from storage
+// SaveInstances is kept for compatibility with callers that still operate on a flat session list.
+func (s *Storage) SaveInstances(instances []*Instance) error {
+	projectsByID := make(map[string]*Project)
+	orderedProjects := make([]*Project, 0)
+
+	for _, instance := range instances {
+		projectID := instance.ProjectID
+		if projectID == "" {
+			projectID = "compat-" + instance.ID
+		}
+
+		project, ok := projectsByID[projectID]
+		if !ok {
+			project = &Project{
+				ID:        projectID,
+				Name:      filepath.Base(instance.Path),
+				RootPath:  instance.Path,
+				Kind:      instance.ProjectKind,
+				CreatedAt: time.Now(),
+				UpdatedAt: time.Now(),
+				Sessions:  []*Instance{},
+			}
+			projectsByID[projectID] = project
+			orderedProjects = append(orderedProjects, project)
+		}
+		project.Sessions = append(project.Sessions, instance)
+	}
+
+	return s.SaveProjects(orderedProjects)
+}
+
 func (s *Storage) DeleteInstance(title string) error {
-	instances, err := s.LoadInstances()
+	projects, err := s.LoadProjects()
 	if err != nil {
-		return fmt.Errorf("failed to load instances: %w", err)
+		return err
 	}
 
 	found := false
-	newInstances := make([]*Instance, 0)
-	for _, instance := range instances {
-		data := instance.ToInstanceData()
-		if data.Title != title {
-			newInstances = append(newInstances, instance)
-		} else {
-			found = true
+	for _, project := range projects {
+		filtered := project.Sessions[:0]
+		for _, instance := range project.Sessions {
+			if !found && instance.Title == title {
+				found = true
+				continue
+			}
+			filtered = append(filtered, instance)
 		}
+		project.Sessions = filtered
 	}
 
 	if !found {
 		return fmt.Errorf("instance not found: %s", title)
 	}
-
-	return s.SaveInstances(newInstances)
-}
-
-// UpdateInstance updates an existing instance in storage
-func (s *Storage) UpdateInstance(instance *Instance) error {
-	instances, err := s.LoadInstances()
-	if err != nil {
-		return fmt.Errorf("failed to load instances: %w", err)
-	}
-
-	data := instance.ToInstanceData()
-	found := false
-	for i, existing := range instances {
-		existingData := existing.ToInstanceData()
-		if existingData.Title == data.Title {
-			instances[i] = instance
-			found = true
-			break
-		}
-	}
-
-	if !found {
-		return fmt.Errorf("instance not found: %s", data.Title)
-	}
-
-	return s.SaveInstances(instances)
-}
-
-// DeleteAllInstances removes all stored instances
-func (s *Storage) DeleteAllInstances() error {
-	return s.state.DeleteAllInstances()
+	return s.SaveProjects(projects)
 }

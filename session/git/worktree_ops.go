@@ -151,70 +151,141 @@ func (g *GitWorktree) Prune() error {
 	return nil
 }
 
-// CleanupWorktrees removes all worktrees and their associated branches
+func runGitCommandAt(path string, args ...string) (string, error) {
+	cmd := exec.Command("git", append([]string{"-C", path}, args...)...)
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return "", fmt.Errorf("git command failed: %s (%w)", output, err)
+	}
+	return strings.TrimSpace(string(output)), nil
+}
+
+func repoPathForWorktree(worktreePath string) (string, error) {
+	commonDir, err := runGitCommandAt(worktreePath, "rev-parse", "--path-format=absolute", "--git-common-dir")
+	if err != nil {
+		return "", err
+	}
+	if commonDir == "" {
+		return "", fmt.Errorf("git common dir not found for worktree %s", worktreePath)
+	}
+	if filepath.Base(commonDir) == ".git" {
+		return filepath.Dir(commonDir), nil
+	}
+	return filepath.Dir(commonDir), nil
+}
+
+func branchNameForWorktree(worktreePath string) string {
+	branchName, err := runGitCommandAt(worktreePath, "rev-parse", "--abbrev-ref", "HEAD")
+	if err != nil {
+		if log.ErrorLog != nil {
+			log.ErrorLog.Printf("failed to resolve branch for worktree %s: %v", worktreePath, err)
+		}
+		return ""
+	}
+	if branchName == "HEAD" {
+		return ""
+	}
+	return branchName
+}
+
+func collectManagedWorktrees(root string) ([]string, error) {
+	worktreePaths := make([]string, 0)
+	err := filepath.WalkDir(root, func(path string, d os.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if !d.IsDir() {
+			return nil
+		}
+		if path == root {
+			return nil
+		}
+		if _, err := os.Stat(filepath.Join(path, ".git")); err == nil {
+			worktreePaths = append(worktreePaths, path)
+			return filepath.SkipDir
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return worktreePaths, nil
+}
+
+// CleanupWorktrees removes all managed worktrees and best-effort associated branches.
 func CleanupWorktrees() error {
 	worktreesDir, err := getWorktreeDirectory()
 	if err != nil {
 		return fmt.Errorf("failed to get worktree directory: %w", err)
 	}
 
-	entries, err := os.ReadDir(worktreesDir)
+	worktreePaths, err := collectManagedWorktrees(worktreesDir)
 	if err != nil {
-		return fmt.Errorf("failed to read worktree directory: %w", err)
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return fmt.Errorf("failed to discover worktrees: %w", err)
 	}
 
-	// Get a list of all branches associated with worktrees
-	cmd := exec.Command("git", "worktree", "list", "--porcelain")
-	output, err := cmd.Output()
-	if err != nil {
-		return fmt.Errorf("failed to list worktrees: %w", err)
-	}
+	reposToPrune := make(map[string]struct{})
+	var errs []error
 
-	// Parse the output to extract branch names
-	worktreeBranches := make(map[string]string)
-	currentWorktree := ""
-	lines := strings.Split(string(output), "\n")
-	for _, line := range lines {
-		if strings.HasPrefix(line, "worktree ") {
-			currentWorktree = strings.TrimPrefix(line, "worktree ")
-		} else if strings.HasPrefix(line, "branch ") {
-			branchPath := strings.TrimPrefix(line, "branch ")
-			// Extract branch name from refs/heads/branch-name
-			branchName := strings.TrimPrefix(branchPath, "refs/heads/")
-			if currentWorktree != "" {
-				worktreeBranches[currentWorktree] = branchName
+	for _, worktreePath := range worktreePaths {
+		branchName := branchNameForWorktree(worktreePath)
+		repoPath, repoErr := repoPathForWorktree(worktreePath)
+		if repoErr != nil {
+			if log.ErrorLog != nil {
+				log.ErrorLog.Printf("failed to resolve repo for worktree %s: %v", worktreePath, repoErr)
+			}
+			if err := os.RemoveAll(worktreePath); err != nil {
+				errs = append(errs, fmt.Errorf("failed to remove worktree directory %s: %w", worktreePath, err))
+			}
+			continue
+		}
+		reposToPrune[repoPath] = struct{}{}
+
+		if _, err := runGitCommandAt(worktreePath, "worktree", "remove", "-f", worktreePath); err != nil {
+			if log.ErrorLog != nil {
+				log.ErrorLog.Printf("failed to remove git worktree %s: %v", worktreePath, err)
+			}
+			if removeErr := os.RemoveAll(worktreePath); removeErr != nil {
+				errs = append(errs, fmt.Errorf("failed to remove worktree directory %s: %w", worktreePath, removeErr))
+			}
+		}
+
+		if branchName == "" {
+			continue
+		}
+		if _, err := runGitCommandAt(repoPath, "branch", "-D", branchName); err != nil {
+			if log.ErrorLog != nil {
+				log.ErrorLog.Printf("failed to delete branch %s for worktree %s: %v", branchName, worktreePath, err)
 			}
 		}
 	}
 
-	for _, entry := range entries {
-		if entry.IsDir() {
-			worktreePath := filepath.Join(worktreesDir, entry.Name())
+	if err := os.RemoveAll(worktreesDir); err != nil && !os.IsNotExist(err) {
+		errs = append(errs, fmt.Errorf("failed to remove worktrees directory %s: %w", worktreesDir, err))
+	}
 
-			// Delete the branch associated with this worktree if found
-			for path, branch := range worktreeBranches {
-				if strings.Contains(path, entry.Name()) {
-					// Delete the branch
-					deleteCmd := exec.Command("git", "branch", "-D", branch)
-					if err := deleteCmd.Run(); err != nil {
-						// Log the error but continue with other worktrees
-						log.ErrorLog.Printf("failed to delete branch %s: %v", branch, err)
-					}
-					break
-				}
+	for repoPath := range reposToPrune {
+		if _, err := runGitCommandAt(repoPath, "worktree", "prune"); err != nil {
+			if log.ErrorLog != nil {
+				log.ErrorLog.Printf("failed to prune worktrees for repo %s: %v", repoPath, err)
 			}
-
-			// Remove the worktree directory
-			os.RemoveAll(worktreePath)
 		}
 	}
 
-	// You have to prune the cleaned up worktrees.
-	cmd = exec.Command("git", "worktree", "prune")
-	_, err = cmd.Output()
-	if err != nil {
-		return fmt.Errorf("failed to prune worktrees: %w", err)
+	if len(errs) == 0 {
+		return nil
 	}
 
-	return nil
+	if len(errs) == 1 {
+		return errs[0]
+	}
+
+	msg := "multiple worktree cleanup errors occurred:"
+	for _, err := range errs {
+		msg += "\n  - " + err.Error()
+	}
+	return fmt.Errorf("%s", msg)
 }

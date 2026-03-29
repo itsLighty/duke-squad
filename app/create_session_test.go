@@ -70,7 +70,12 @@ func TestBuildSessionProfilesAppendsCustomConfiguredProfileWithoutPathLabel(t *t
 }
 
 func TestNewCreateSessionInstanceUsesSelectedProgram(t *testing.T) {
-	instance, err := newCreateSessionInstance("feature", ".", "codex", "ship it", "", true)
+	project := &session.Project{
+		ID:       "proj-test",
+		RootPath: t.TempDir(),
+		Kind:     session.ProjectKindFolder,
+	}
+	instance, err := newCreateSessionInstance("feature", project, "codex", "ship it", "", true)
 	require.NoError(t, err)
 
 	assert.Equal(t, "codex", providerKey(instance.Program))
@@ -98,7 +103,7 @@ func TestCancelCreateOverlayLeavesListUntouched(t *testing.T) {
 		state:            stateCreate,
 		list:             list,
 		menu:             ui.NewMenu(),
-		textInputOverlay: overlay.NewSessionCreateOverlay("", []config.Profile{{Name: "claude", Program: "claude"}}, 0, false),
+		textInputOverlay: overlay.NewSessionCreateOverlay("", []config.Profile{{Name: "claude", Program: "claude"}}, 0, false, false),
 	}
 
 	cmd := h.cancelCreateOverlay()
