@@ -24,13 +24,15 @@ func RunDaemon(cfg *config.Config) error {
 		return fmt.Errorf("failed to initialize storage: %w", err)
 	}
 
-	instances, err := storage.LoadInstances()
+	projects, err := storage.LoadProjects()
 	if err != nil {
-		return fmt.Errorf("failed to load instacnes: %w", err)
+		return fmt.Errorf("failed to load projects: %w", err)
 	}
-	for _, instance := range instances {
-		// Assume AutoYes is true if the daemon is running.
-		instance.AutoYes = true
+	for _, project := range projects {
+		for _, instance := range project.Sessions {
+			// Assume AutoYes is true if the daemon is running.
+			instance.AutoYes = true
+		}
 	}
 
 	pollInterval := time.Duration(cfg.DaemonPollInterval) * time.Millisecond
@@ -45,14 +47,15 @@ func RunDaemon(cfg *config.Config) error {
 		defer wg.Done()
 		ticker := time.NewTimer(pollInterval)
 		for {
-			for _, instance := range instances {
-				// We only store started instances, but check anyway.
-				if instance.Started() && !instance.Paused() {
-					if _, hasPrompt := instance.HasUpdated(); hasPrompt {
-						instance.TapEnter()
-						if err := instance.UpdateDiffStats(); err != nil {
-							if everyN.ShouldLog() {
-								log.WarningLog.Printf("could not update diff stats for %s: %v", instance.Title, err)
+			for _, project := range projects {
+				for _, instance := range project.Sessions {
+					if instance.Started() && !instance.Paused() {
+						if _, hasPrompt := instance.HasUpdated(); hasPrompt {
+							instance.TapEnter()
+							if err := instance.UpdateDiffStats(); err != nil {
+								if everyN.ShouldLog() {
+									log.WarningLog.Printf("could not update diff stats for %s: %v", instance.Title, err)
+								}
 							}
 						}
 					}
@@ -81,7 +84,7 @@ func RunDaemon(cfg *config.Config) error {
 	close(stopCh)
 	wg.Wait()
 
-	if err := storage.SaveInstances(instances); err != nil {
+	if err := storage.SaveProjects(projects); err != nil {
 		log.ErrorLog.Printf("failed to save instances when terminating daemon: %v", err)
 	}
 	return nil

@@ -60,16 +60,33 @@ func NewTextInputOverlay(title string, initialValue string) *TextInputOverlay {
 // empty branch picker. Results are populated asynchronously via SetBranchResults.
 func NewTextInputOverlayWithBranchPicker(title string, initialValue string, profiles []config.Profile) *TextInputOverlay {
 	ti := newTextarea(initialValue)
-	bp := NewBranchPicker()
+	return newTextInputOverlay(title, ti, profiles, true)
+}
+
+// NewTextInputOverlayWithProfiles creates a text input overlay that includes profile selection
+// without branch selection.
+func NewTextInputOverlayWithProfiles(title string, initialValue string, profiles []config.Profile) *TextInputOverlay {
+	ti := newTextarea(initialValue)
+	return newTextInputOverlay(title, ti, profiles, false)
+}
+
+func newTextInputOverlay(title string, ti textarea.Model, profiles []config.Profile, withBranchPicker bool) *TextInputOverlay {
+	var bp *BranchPicker
+	if withBranchPicker {
+		bp = NewBranchPicker()
+	}
 
 	var pp *ProfilePicker
 	if len(profiles) > 0 {
 		pp = NewProfilePicker(profiles)
 	}
 
-	numStops := 3 // textarea + branch picker + enter button
+	numStops := 2 // textarea + enter button
+	if bp != nil {
+		numStops++
+	}
 	if pp != nil && pp.HasMultiple() {
-		numStops = 4 // profile picker + textarea + branch picker + enter button
+		numStops++
 	}
 
 	overlay := &TextInputOverlay{

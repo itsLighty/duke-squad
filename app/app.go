@@ -40,6 +40,8 @@ const (
 	stateNew
 	// statePrompt is the state when the user is entering a prompt.
 	statePrompt
+	// stateAddProject is the state when the user is entering a project path.
+	stateAddProject
 	// stateHelp is the state when a help screen is displayed.
 	stateHelp
 	// stateConfirm is the state when a confirmation modal is displayed.
@@ -77,7 +79,7 @@ type home struct {
 
 	// -- UI Components --
 
-	// list displays the list of instances
+	// list displays the project tree
 	list *ui.List
 	// menu displays the bottom menu
 	menu *ui.Menu
@@ -124,20 +126,25 @@ func newHome(ctx context.Context, program string, autoYes bool) *home {
 	}
 	h.list = ui.NewList(&h.spinner, autoYes)
 
-	// Load saved instances
-	instances, err := storage.LoadInstances()
+	// Load saved projects
+	projects, err := storage.LoadProjects()
 	if err != nil {
-		fmt.Printf("Failed to load instances: %v\n", err)
+		fmt.Printf("Failed to load projects: %v\n", err)
 		os.Exit(1)
 	}
 
-	// Add loaded instances to the list
-	for _, instance := range instances {
-		// Call the finalizer immediately.
-		h.list.AddInstance(instance)()
-		if autoYes {
-			instance.AutoYes = true
+	// Add loaded projects to the list
+	h.list.SetProjects(projects)
+	for _, project := range projects {
+		for _, instance := range project.Sessions {
+			if autoYes {
+				instance.AutoYes = true
+			}
 		}
+	}
+
+	if cwd, err := os.Getwd(); err == nil {
+		h.list.SelectProjectForPath(cwd)
 	}
 
 	return h
@@ -270,12 +277,15 @@ func (m *home) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.list.SelectInstance(msg.instance)
 
 		if msg.err != nil {
-			m.list.Kill()
+			if selected := m.list.GetSelectedInstance(); selected != nil {
+				_ = selected.Kill()
+				m.list.RemoveSession(selected.ID)
+			}
 			return m, tea.Batch(m.handleError(msg.err), m.instanceChanged())
 		}
 
 		// Save after successful start
-		if err := m.storage.SaveInstances(m.list.GetInstances()); err != nil {
+		if err := m.saveProjects(); err != nil {
 			return m, m.handleError(err)
 		}
 		if m.autoYes {
@@ -285,7 +295,7 @@ func (m *home) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.promptAfterName {
 			m.state = statePrompt
 			m.menu.SetState(ui.StatePrompt)
-			m.textInputOverlay = m.newPromptOverlay()
+			m.textInputOverlay = m.newPromptOverlay(m.list.GetSelectedProject())
 		} else {
 			// If instance has a prompt (set from Shift+N flow), send it now
 			if msg.instance.Prompt != "" {
@@ -308,7 +318,7 @@ func (m *home) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m *home) handleQuit() (tea.Model, tea.Cmd) {
-	if err := m.storage.SaveInstances(m.list.GetInstances()); err != nil {
+	if err := m.saveProjects(); err != nil {
 		return m, m.handleError(err)
 	}
 	return m, tea.Quit
@@ -321,7 +331,7 @@ func (m *home) handleMenuHighlighting(msg tea.KeyMsg) (cmd tea.Cmd, returnEarly 
 		m.keySent = false
 		return nil, false
 	}
-	if m.state == statePrompt || m.state == stateHelp || m.state == stateConfirm {
+	if m.state == statePrompt || m.state == stateAddProject || m.state == stateHelp || m.state == stateConfirm {
 		return nil, false
 	}
 	// If it's in the global keymap, we should try to highlight it.
@@ -363,7 +373,9 @@ func (m *home) handleKeyPress(msg tea.KeyMsg) (mod tea.Model, cmd tea.Cmd) {
 		if msg.String() == "ctrl+c" {
 			m.state = stateDefault
 			m.promptAfterName = false
-			m.list.Kill()
+			if instance := m.list.GetSelectedInstance(); instance != nil {
+				m.list.RemoveSession(instance.ID)
+			}
 			return m, tea.Sequence(
 				tea.WindowSize(),
 				func() tea.Msg {
@@ -373,7 +385,10 @@ func (m *home) handleKeyPress(msg tea.KeyMsg) (mod tea.Model, cmd tea.Cmd) {
 			)
 		}
 
-		instance := m.list.GetInstances()[m.list.NumInstances()-1]
+		instance := m.list.GetSelectedInstance()
+		if instance == nil {
+			return m, nil
+		}
 		switch msg.Type {
 		// Start the instance (enable previews etc) and go back to the main menu state.
 		case tea.KeyEnter:
@@ -386,10 +401,12 @@ func (m *home) handleKeyPress(msg tea.KeyMsg) (mod tea.Model, cmd tea.Cmd) {
 				m.promptAfterName = false
 				m.state = statePrompt
 				m.menu.SetState(ui.StatePrompt)
-				m.textInputOverlay = m.newPromptOverlay()
-				// Trigger initial branch search (no debounce, version 0)
-				initialSearch := m.runBranchSearch("", m.textInputOverlay.BranchFilterVersion())
-				return m, tea.Batch(tea.WindowSize(), initialSearch)
+				m.textInputOverlay = m.newPromptOverlay(m.list.GetSelectedProject())
+				if project := m.list.GetSelectedProject(); project != nil && project.Kind == session.ProjectKindGit {
+					initialSearch := m.runBranchSearch("", m.textInputOverlay.BranchFilterVersion())
+					return m, tea.Batch(tea.WindowSize(), initialSearch)
+				}
+				return m, tea.WindowSize()
 			}
 
 			// Set Loading status and finalize into the list immediately
@@ -430,7 +447,7 @@ func (m *home) handleKeyPress(msg tea.KeyMsg) (mod tea.Model, cmd tea.Cmd) {
 				return m, m.handleError(err)
 			}
 		case tea.KeyEsc:
-			m.list.Kill()
+			m.list.RemoveSession(instance.ID)
 			m.state = stateDefault
 			m.instanceChanged()
 
@@ -522,10 +539,49 @@ func (m *home) handleKeyPress(msg tea.KeyMsg) (mod tea.Model, cmd tea.Cmd) {
 		if branchFilterChanged {
 			filter := m.textInputOverlay.BranchFilter()
 			version := m.textInputOverlay.BranchFilterVersion()
-			return m, m.scheduleBranchSearch(filter, version)
+			if project := m.list.GetSelectedProject(); project != nil && project.Kind == session.ProjectKindGit {
+				return m, m.scheduleBranchSearch(filter, version)
+			}
 		}
 
 		return m, nil
+	} else if m.state == stateAddProject {
+		if msg.String() == "ctrl+c" {
+			m.textInputOverlay = nil
+			m.state = stateDefault
+			return m, tea.WindowSize()
+		}
+
+		shouldClose, _ := m.textInputOverlay.HandleKeyPress(msg)
+		if !shouldClose {
+			return m, nil
+		}
+		if m.textInputOverlay.IsCanceled() {
+			m.textInputOverlay = nil
+			m.state = stateDefault
+			return m, tea.WindowSize()
+		}
+		if !m.textInputOverlay.IsSubmitted() {
+			return m, nil
+		}
+
+		project, err := session.NewProject(m.textInputOverlay.GetValue())
+		if err != nil {
+			return m, m.handleError(err)
+		}
+		for _, existing := range m.list.GetProjects() {
+			if existing.RootPath == project.RootPath {
+				return m, m.handleError(fmt.Errorf("project already exists: %s", existing.RootPath))
+			}
+		}
+
+		m.list.AddProject(project)
+		m.textInputOverlay = nil
+		m.state = stateDefault
+		if err := m.saveProjects(); err != nil {
+			return m, m.handleError(err)
+		}
+		return m, tea.Batch(tea.WindowSize(), m.instanceChanged())
 	}
 
 	// Handle confirmation state
@@ -573,30 +629,41 @@ func (m *home) handleKeyPress(msg tea.KeyMsg) (mod tea.Model, cmd tea.Cmd) {
 	switch name {
 	case keys.KeyHelp:
 		return m.showHelpScreen(helpTypeGeneral{}, nil)
+	case keys.KeyAddProject:
+		m.state = stateAddProject
+		m.menu.SetState(ui.StatePrompt)
+		m.textInputOverlay = overlay.NewTextInputOverlay("Add project folder", "")
+		return m, tea.WindowSize()
 	case keys.KeyPrompt:
 		if m.list.NumInstances() >= GlobalInstanceLimit {
 			return m, m.handleError(
 				fmt.Errorf("you can't create more than %d instances", GlobalInstanceLimit))
 		}
+		project := m.list.GetSelectedProject()
+		if project == nil {
+			return m, m.handleError(fmt.Errorf("add a project first"))
+		}
 
 		// Start a background fetch so branches are up to date by the time the picker opens
 		fetchCmd := func() tea.Msg {
-			currentDir, _ := os.Getwd()
-			git.FetchBranches(currentDir)
+			if project.Kind == session.ProjectKindGit {
+				git.FetchBranches(project.RootPath)
+			}
 			return nil
 		}
 
 		instance, err := session.NewInstance(session.InstanceOptions{
-			Title:   "",
-			Path:    ".",
-			Program: m.program,
+			Title:       "",
+			Path:        project.RootPath,
+			Program:     m.program,
+			ProjectID:   project.ID,
+			ProjectKind: project.Kind,
 		})
 		if err != nil {
 			return m, m.handleError(err)
 		}
 
-		m.newInstanceFinalizer = m.list.AddInstance(instance)
-		m.list.SetSelectedInstance(m.list.NumInstances() - 1)
+		m.newInstanceFinalizer = m.list.AddSession(project.ID, instance)
 		m.state = stateNew
 		m.menu.SetState(ui.StateNewInstance)
 		m.promptAfterName = true
@@ -607,17 +674,22 @@ func (m *home) handleKeyPress(msg tea.KeyMsg) (mod tea.Model, cmd tea.Cmd) {
 			return m, m.handleError(
 				fmt.Errorf("you can't create more than %d instances", GlobalInstanceLimit))
 		}
+		project := m.list.GetSelectedProject()
+		if project == nil {
+			return m, m.handleError(fmt.Errorf("add a project first"))
+		}
 		instance, err := session.NewInstance(session.InstanceOptions{
-			Title:   "",
-			Path:    ".",
-			Program: m.program,
+			Title:       "",
+			Path:        project.RootPath,
+			Program:     m.program,
+			ProjectID:   project.ID,
+			ProjectKind: project.Kind,
 		})
 		if err != nil {
 			return m, m.handleError(err)
 		}
 
-		m.newInstanceFinalizer = m.list.AddInstance(instance)
-		m.list.SetSelectedInstance(m.list.NumInstances() - 1)
+		m.newInstanceFinalizer = m.list.AddSession(project.ID, instance)
 		m.state = stateNew
 		m.menu.SetState(ui.StateNewInstance)
 
@@ -640,37 +712,57 @@ func (m *home) handleKeyPress(msg tea.KeyMsg) (mod tea.Model, cmd tea.Cmd) {
 		return m, m.instanceChanged()
 	case keys.KeyKill:
 		selected := m.list.GetSelectedInstance()
-		if selected == nil || selected.Status == session.Loading {
+		if selected == nil {
+			project := m.list.GetSelectedProject()
+			if project == nil {
+				return m, nil
+			}
+			if len(project.Sessions) > 0 {
+				return m, m.handleError(fmt.Errorf("remove project sessions before deleting the project"))
+			}
+			removeProject := func() tea.Msg {
+				m.list.RemoveProject(project.ID)
+				if err := m.saveProjects(); err != nil {
+					return err
+				}
+				return instanceChangedMsg{}
+			}
+			message := fmt.Sprintf("[!] Remove project '%s'?", project.Name)
+			return m, m.confirmAction(message, removeProject)
+		}
+		if selected.Status == session.Loading {
 			return m, nil
 		}
 
 		// Create the kill action as a tea.Cmd
 		killAction := func() tea.Msg {
-			// Get worktree and check if branch is checked out
-			worktree, err := selected.GetGitWorktree()
-			if err != nil {
-				return err
-			}
+			if selected.SupportsCheckout() {
+				worktree, err := selected.GetGitWorktree()
+				if err != nil {
+					return err
+				}
 
-			checkedOut, err := worktree.IsBranchCheckedOut()
-			if err != nil {
-				return err
-			}
+				checkedOut, err := worktree.IsBranchCheckedOut()
+				if err != nil {
+					return err
+				}
 
-			if checkedOut {
-				return fmt.Errorf("instance %s is currently checked out", selected.Title)
+				if checkedOut {
+					return fmt.Errorf("instance %s is currently checked out", selected.Title)
+				}
 			}
 
 			// Clean up terminal session for this instance
-			m.tabbedWindow.CleanupTerminalForInstance(selected.Title)
+			m.tabbedWindow.CleanupTerminalForInstance(selected.ID)
 
-			// Delete from storage first
-			if err := m.storage.DeleteInstance(selected.Title); err != nil {
+			if err := selected.Kill(); err != nil {
 				return err
 			}
-
-			// Then kill the instance
-			m.list.Kill()
+			m.tabbedWindow.CleanupTerminalForInstance(selected.ID)
+			m.list.RemoveSession(selected.ID)
+			if err := m.saveProjects(); err != nil {
+				return err
+			}
 			return instanceChangedMsg{}
 		}
 
@@ -679,7 +771,7 @@ func (m *home) handleKeyPress(msg tea.KeyMsg) (mod tea.Model, cmd tea.Cmd) {
 		return m, m.confirmAction(message, killAction)
 	case keys.KeySubmit:
 		selected := m.list.GetSelectedInstance()
-		if selected == nil || selected.Status == session.Loading {
+		if selected == nil || selected.Status == session.Loading || !selected.SupportsPush() {
 			return m, nil
 		}
 
@@ -687,11 +779,7 @@ func (m *home) handleKeyPress(msg tea.KeyMsg) (mod tea.Model, cmd tea.Cmd) {
 		pushAction := func() tea.Msg {
 			// Default commit message with timestamp
 			commitMsg := fmt.Sprintf("[claudesquad] update from '%s' on %s", selected.Title, time.Now().Format(time.RFC822))
-			worktree, err := selected.GetGitWorktree()
-			if err != nil {
-				return err
-			}
-			if err = worktree.PushChanges(commitMsg, true); err != nil {
+			if err := selected.PushChanges(commitMsg, true); err != nil {
 				return err
 			}
 			return nil
@@ -711,7 +799,7 @@ func (m *home) handleKeyPress(msg tea.KeyMsg) (mod tea.Model, cmd tea.Cmd) {
 			if err := selected.Pause(); err != nil {
 				m.handleError(err)
 			}
-			m.tabbedWindow.CleanupTerminalForInstance(selected.Title)
+			m.tabbedWindow.CleanupTerminalForInstance(selected.ID)
 			m.instanceChanged()
 		})
 		return m, nil
@@ -725,6 +813,10 @@ func (m *home) handleKeyPress(msg tea.KeyMsg) (mod tea.Model, cmd tea.Cmd) {
 		}
 		return m, tea.WindowSize()
 	case keys.KeyEnter:
+		if m.list.IsProjectSelected() {
+			m.list.ToggleSelectedProjectCollapsed()
+			return m, m.instanceChanged()
+		}
 		if m.list.NumInstances() == 0 {
 			return m, nil
 		}
@@ -764,19 +856,21 @@ func (m *home) handleKeyPress(msg tea.KeyMsg) (mod tea.Model, cmd tea.Cmd) {
 // instanceChanged updates the preview pane, menu, and diff pane based on the selected instance. It returns an error
 // Cmd if there was any error.
 func (m *home) instanceChanged() tea.Cmd {
-	// selected may be nil
-	selected := m.list.GetSelectedInstance()
+	selection := m.list.GetSelection()
+	selected := selection.Instance
+	project := selection.Project
 
-	m.tabbedWindow.UpdateDiff(selected)
-	m.tabbedWindow.SetInstance(selected)
+	m.tabbedWindow.UpdateDiff(project, selected)
+	m.tabbedWindow.SetSelection(project, selected)
 	// Update menu with current instance
 	m.menu.SetInstance(selected)
+	m.menu.SetProject(project, m.list.IsProjectSelected())
 
 	// If there's no selected instance, we don't need to update the preview.
-	if err := m.tabbedWindow.UpdatePreview(selected); err != nil {
+	if err := m.tabbedWindow.UpdatePreview(project, selected); err != nil {
 		return m.handleError(err)
 	}
-	if err := m.tabbedWindow.UpdateTerminal(selected); err != nil {
+	if err := m.tabbedWindow.UpdateTerminal(project, selected); err != nil {
 		return m.handleError(err)
 	}
 	return nil
@@ -839,8 +933,11 @@ func (m *home) scheduleBranchSearch(filter string, version uint64) tea.Cmd {
 // runBranchSearch returns a tea.Cmd that performs the git search in the background.
 func (m *home) runBranchSearch(filter string, version uint64) tea.Cmd {
 	return func() tea.Msg {
-		currentDir, _ := os.Getwd()
-		branches, err := git.SearchBranches(currentDir, filter)
+		project := m.list.GetSelectedProject()
+		if project == nil || project.Kind != session.ProjectKindGit {
+			return nil
+		}
+		branches, err := git.SearchBranches(project.RootPath, filter)
 		if err != nil {
 			log.WarningLog.Printf("branch search failed: %v", err)
 			return nil
@@ -871,15 +968,18 @@ func (m *home) handleError(err error) tea.Cmd {
 	}
 }
 
-func (m *home) newPromptOverlay() *overlay.TextInputOverlay {
-	return overlay.NewTextInputOverlayWithBranchPicker("Enter prompt", "", m.appConfig.GetProfiles())
+func (m *home) newPromptOverlay(project *session.Project) *overlay.TextInputOverlay {
+	if project != nil && project.Kind == session.ProjectKindGit {
+		return overlay.NewTextInputOverlayWithBranchPicker("Enter prompt", "", m.appConfig.GetProfiles())
+	}
+	return overlay.NewTextInputOverlayWithProfiles("Enter prompt", "", m.appConfig.GetProfiles())
 }
 
 // cancelPromptOverlay cancels the prompt overlay, cleaning up unstarted instances.
 func (m *home) cancelPromptOverlay() tea.Cmd {
 	selected := m.list.GetSelectedInstance()
 	if selected != nil && !selected.Started() {
-		m.list.Kill()
+		m.list.RemoveSession(selected.ID)
 	}
 	m.textInputOverlay = nil
 	m.state = stateDefault
@@ -917,6 +1017,10 @@ func (m *home) confirmAction(message string, action tea.Cmd) tea.Cmd {
 	return nil
 }
 
+func (m *home) saveProjects() error {
+	return m.storage.SaveProjects(m.list.GetProjects())
+}
+
 func (m *home) View() string {
 	listWithPadding := lipgloss.NewStyle().PaddingTop(1).Render(m.list.String())
 	previewWithPadding := lipgloss.NewStyle().PaddingTop(1).Render(m.tabbedWindow.String())
@@ -929,7 +1033,7 @@ func (m *home) View() string {
 		m.errBox.String(),
 	)
 
-	if m.state == statePrompt {
+	if m.state == statePrompt || m.state == stateAddProject {
 		if m.textInputOverlay == nil {
 			log.ErrorLog.Printf("text input overlay is nil")
 		}

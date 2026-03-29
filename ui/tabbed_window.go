@@ -54,6 +54,7 @@ type TabbedWindow struct {
 	diff     *DiffPane
 	terminal *TerminalPane
 	instance *session.Instance
+	project  *session.Project
 }
 
 func NewTabbedWindow(preview *PreviewPane, diff *DiffPane, terminal *TerminalPane) *TabbedWindow {
@@ -69,7 +70,8 @@ func NewTabbedWindow(preview *PreviewPane, diff *DiffPane, terminal *TerminalPan
 	}
 }
 
-func (w *TabbedWindow) SetInstance(instance *session.Instance) {
+func (w *TabbedWindow) SetSelection(project *session.Project, instance *session.Instance) {
+	w.project = project
 	w.instance = instance
 }
 
@@ -104,26 +106,26 @@ func (w *TabbedWindow) Toggle() {
 }
 
 // UpdatePreview updates the content of the preview pane. instance may be nil.
-func (w *TabbedWindow) UpdatePreview(instance *session.Instance) error {
+func (w *TabbedWindow) UpdatePreview(project *session.Project, instance *session.Instance) error {
 	if w.activeTab != PreviewTab {
 		return nil
 	}
-	return w.preview.UpdateContent(instance)
+	return w.preview.UpdateContent(project, instance)
 }
 
-func (w *TabbedWindow) UpdateDiff(instance *session.Instance) {
+func (w *TabbedWindow) UpdateDiff(project *session.Project, instance *session.Instance) {
 	if w.activeTab != DiffTab {
 		return
 	}
-	w.diff.SetDiff(instance)
+	w.diff.SetDiff(project, instance)
 }
 
 // UpdateTerminal updates the terminal pane content. Only updates when terminal tab is active.
-func (w *TabbedWindow) UpdateTerminal(instance *session.Instance) error {
+func (w *TabbedWindow) UpdateTerminal(project *session.Project, instance *session.Instance) error {
 	if w.activeTab != TerminalTab {
 		return nil
 	}
-	return w.terminal.UpdateContent(instance)
+	return w.terminal.UpdateContent(project, instance)
 }
 
 // ResetPreviewToNormalMode resets the preview pane to normal mode

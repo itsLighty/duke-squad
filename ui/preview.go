@@ -50,10 +50,26 @@ func (p *PreviewPane) setFallbackState(message string) {
 }
 
 // Updates the preview pane content with the tmux pane content
-func (p *PreviewPane) UpdateContent(instance *session.Instance) error {
+func (p *PreviewPane) UpdateContent(project *session.Project, instance *session.Instance) error {
 	switch {
-	case instance == nil:
-		p.setFallbackState("No agents running yet. Spin up a new instance with 'n' to get started!")
+	case project == nil && instance == nil:
+		p.setFallbackState("No projects yet. Add one with 'a' to start tracking work.")
+		return nil
+	case project != nil && instance == nil:
+		kindLabel := "Folder project"
+		if project.Kind == session.ProjectKindGit {
+			kindLabel = "Git project"
+		}
+		p.setFallbackState(lipgloss.JoinVertical(
+			lipgloss.Center,
+			project.Name,
+			"",
+			kindLabel,
+			project.RootPath,
+			"",
+			fmt.Sprintf("%d sessions", len(project.Sessions)),
+			"Press 'n' to start a session in this project.",
+		))
 		return nil
 	case instance.Status == session.Loading:
 		p.setFallbackState("Setting up workspace...")

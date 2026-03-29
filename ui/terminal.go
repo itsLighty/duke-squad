@@ -30,8 +30,8 @@ type terminalSession struct {
 type TerminalPane struct {
 	mu            sync.Mutex
 	width, height int
-	sessions      map[string]*terminalSession // instanceTitle → session
-	currentTitle  string                      // currently displayed instance
+	sessions      map[string]*terminalSession // instanceID → session
+	currentTitle  string                      // currently displayed instance id
 	content       string
 	fallback      bool
 	fallbackText  string
@@ -70,12 +70,16 @@ func (t *TerminalPane) setFallbackState(message string) {
 }
 
 // UpdateContent captures the tmux pane output for the terminal session.
-func (t *TerminalPane) UpdateContent(instance *session.Instance) error {
+func (t *TerminalPane) UpdateContent(project *session.Project, instance *session.Instance) error {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 
-	if instance == nil {
-		t.setFallbackState("Select an instance to open a terminal")
+	if project == nil && instance == nil {
+		t.setFallbackState("Add a project to open session terminals")
+		return nil
+	}
+	if project != nil && instance == nil {
+		t.setFallbackState("Select a session in this project to open a terminal")
 		return nil
 	}
 	if instance.Status == session.Paused {
@@ -132,14 +136,21 @@ func (t *TerminalPane) ensureSessionLocked(instance *session.Instance) error {
 		return nil
 	}
 
-	t.currentTitle = instance.Title
+	t.currentTitle = instance.ID
 
 	// Check if we already have a cached session for this instance
-	if s, ok := t.sessions[instance.Title]; ok {
+	if s, ok := t.sessions[instance.ID]; ok {
 		if s.tmuxSession != nil && s.tmuxSession.DoesSessionExist() {
 			return nil
 		}
 		// Session died, remove stale entry and recreate below
+		delete(t.sessions, instance.ID)
+	}
+	if s, ok := t.sessions[instance.Title]; ok {
+		if s.tmuxSession != nil && s.tmuxSession.DoesSessionExist() {
+			t.currentTitle = instance.Title
+			return nil
+		}
 		delete(t.sessions, instance.Title)
 	}
 
@@ -148,7 +159,7 @@ func (t *TerminalPane) ensureSessionLocked(instance *session.Instance) error {
 		shell = "/bin/sh"
 	}
 
-	termName := "term_" + instance.Title
+	termName := "term_" + instance.ID
 	ts := tmux.NewTmuxSession(termName, shell)
 
 	// Check if session already exists (e.g. from a previous run)
@@ -167,7 +178,7 @@ func (t *TerminalPane) ensureSessionLocked(instance *session.Instance) error {
 		}
 	}
 
-	t.sessions[instance.Title] = &terminalSession{
+	t.sessions[instance.ID] = &terminalSession{
 		tmuxSession:  ts,
 		worktreePath: worktreePath,
 	}

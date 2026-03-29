@@ -40,7 +40,7 @@ func (d *DiffPane) SetSize(width, height int) {
 	}
 }
 
-func (d *DiffPane) SetDiff(instance *session.Instance) {
+func (d *DiffPane) SetDiff(project *session.Project, instance *session.Instance) {
 	centeredFallbackMessage := lipgloss.Place(
 		d.width,
 		d.height,
@@ -48,6 +48,16 @@ func (d *DiffPane) SetDiff(instance *session.Instance) {
 		lipgloss.Center,
 		"No changes",
 	)
+
+	if project == nil && instance == nil {
+		d.viewport.SetContent(lipgloss.Place(d.width, d.height, lipgloss.Center, lipgloss.Center, "Add a project to view session diffs"))
+		return
+	}
+
+	if project != nil && instance == nil {
+		d.viewport.SetContent(lipgloss.Place(d.width, d.height, lipgloss.Center, lipgloss.Center, "Select a session in this project to view its diff"))
+		return
+	}
 
 	if instance == nil || !instance.Started() {
 		d.viewport.SetContent(centeredFallbackMessage)

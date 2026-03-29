@@ -37,16 +37,6 @@ var (
 				return err
 			}
 
-			// Check if we're in a git repository
-			currentDir, err := filepath.Abs(".")
-			if err != nil {
-				return fmt.Errorf("failed to get current directory: %w", err)
-			}
-
-			if !git.IsGitRepo(currentDir) {
-				return fmt.Errorf("error: claude-squad must be run from within a git repository")
-			}
-
 			cfg := config.LoadConfig()
 
 			// Program flag overrides config
@@ -87,7 +77,7 @@ var (
 			if err != nil {
 				return fmt.Errorf("failed to initialize storage: %w", err)
 			}
-			if err := storage.DeleteAllInstances(); err != nil {
+			if err := storage.DeleteAllProjects(); err != nil {
 				return fmt.Errorf("failed to reset storage: %w", err)
 			}
 			fmt.Println("Storage has been reset successfully")
@@ -101,6 +91,11 @@ var (
 				return fmt.Errorf("failed to cleanup worktrees: %w", err)
 			}
 			fmt.Println("Worktrees have been cleaned up")
+
+			if err := session.CleanupManagedWorkspaces(); err != nil {
+				return fmt.Errorf("failed to cleanup managed workspaces: %w", err)
+			}
+			fmt.Println("Managed workspaces have been cleaned up")
 
 			// Kill any daemon that's running.
 			if err := daemon.StopDaemon(); err != nil {

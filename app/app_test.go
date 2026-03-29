@@ -7,6 +7,7 @@ import (
 	"claude-squad/ui"
 	"claude-squad/ui/overlay"
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"testing"
@@ -16,6 +17,20 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+type fakeAppState struct{}
+
+func (f *fakeAppState) SaveProjects(projectsJSON json.RawMessage) error { return nil }
+func (f *fakeAppState) GetProjects() json.RawMessage                    { return json.RawMessage("[]") }
+func (f *fakeAppState) DeleteAllProjects() error                        { return nil }
+func (f *fakeAppState) SaveInstances(instancesJSON json.RawMessage) error {
+	return nil
+}
+func (f *fakeAppState) GetInstances() json.RawMessage { return json.RawMessage("[]") }
+func (f *fakeAppState) GetHelpScreensSeen() uint32    { return 0 }
+func (f *fakeAppState) SetHelpScreensSeen(seen uint32) error {
+	return nil
+}
 
 // TestMain runs before all tests to set up the test environment
 func TestMain(m *testing.M) {
@@ -267,6 +282,81 @@ func TestConfirmationFlowSimulation(t *testing.T) {
 	// Test that overlay renders with the correct message
 	rendered := h.confirmationOverlay.Render()
 	assert.Contains(t, rendered, "Kill session 'test-session'?")
+}
+
+func TestKillConfirmationRemovesFolderSession(t *testing.T) {
+	spinner := spinner.New(spinner.WithSpinner(spinner.MiniDot))
+	list := ui.NewList(&spinner, false)
+
+	project := &session.Project{
+		ID:       "proj-folder",
+		Name:     "folder-project",
+		RootPath: t.TempDir(),
+		Kind:     session.ProjectKindFolder,
+		Sessions: []*session.Instance{},
+	}
+	list.AddProject(project)
+
+	instance, err := session.NewInstance(session.InstanceOptions{
+		ID:          "sess-folder",
+		ProjectID:   project.ID,
+		ProjectKind: session.ProjectKindFolder,
+		Title:       "folder-session",
+		Path:        project.RootPath,
+		Program:     "claude",
+	})
+	require.NoError(t, err)
+	list.AddSession(project.ID, instance)
+
+	storage, err := session.NewStorage(&fakeAppState{})
+	require.NoError(t, err)
+
+	h := &home{
+		ctx:          context.Background(),
+		state:        stateDefault,
+		appConfig:    config.DefaultConfig(),
+		list:         list,
+		menu:         ui.NewMenu(),
+		storage:      storage,
+		tabbedWindow: ui.NewTabbedWindow(ui.NewPreviewPane(), ui.NewDiffPane(), ui.NewTerminalPane()),
+	}
+
+	selected := h.list.GetSelectedInstance()
+	require.NotNil(t, selected)
+
+	killAction := func() tea.Msg {
+		if selected.SupportsCheckout() {
+			worktree, err := selected.GetGitWorktree()
+			if err != nil {
+				return err
+			}
+
+			checkedOut, err := worktree.IsBranchCheckedOut()
+			if err != nil {
+				return err
+			}
+
+			if checkedOut {
+				return fmt.Errorf("instance %s is currently checked out", selected.Title)
+			}
+		}
+
+		h.tabbedWindow.CleanupTerminalForInstance(selected.ID)
+		if err := selected.Kill(); err != nil {
+			return err
+		}
+		h.tabbedWindow.CleanupTerminalForInstance(selected.ID)
+		h.list.RemoveSession(selected.ID)
+		if err := h.saveProjects(); err != nil {
+			return err
+		}
+		return instanceChangedMsg{}
+	}
+
+	msg := killAction()
+	require.IsType(t, instanceChangedMsg{}, msg)
+	require.Nil(t, h.list.GetSelectedInstance())
+	require.Empty(t, project.Sessions)
 }
 
 // TestConfirmActionWithDifferentTypes tests that confirmAction works with different action types

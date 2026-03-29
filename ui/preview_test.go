@@ -229,7 +229,7 @@ func TestPreviewScrolling(t *testing.T) {
 	previewPane.SetSize(80, 30) // Set reasonable size for testing
 
 	// Step 1: Check initial content - should show normal preview mode
-	err = previewPane.UpdateContent(setup.instance)
+	err = previewPane.UpdateContent(nil, setup.instance)
 	require.NoError(t, err)
 
 	// Verify we're not in scrolling mode initially
@@ -363,7 +363,7 @@ func TestPreviewContentWithoutScrolling(t *testing.T) {
 	previewPane.SetSize(80, 30) // Set reasonable size for testing
 
 	// Update the preview content (this should display the content without scrolling)
-	err := previewPane.UpdateContent(setup.instance)
+	err := previewPane.UpdateContent(nil, setup.instance)
 	require.NoError(t, err)
 
 	// Verify we're not in scrolling mode

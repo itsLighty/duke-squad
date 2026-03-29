@@ -23,6 +23,7 @@ const (
 	KeyCheckout
 	KeyResume
 	KeyPrompt // New key for entering a prompt
+	KeyAddProject
 	KeyHelp   // Key for showing help screen
 
 	// Diff keybindings
@@ -39,6 +40,7 @@ var GlobalKeyStringsMap = map[string]KeyName{
 	"shift+up":   KeyShiftUp,
 	"shift+down": KeyShiftDown,
 	"N":          KeyPrompt,
+	"a":          KeyAddProject,
 	"enter":      KeyEnter,
 	"o":          KeyEnter,
 	"n":          KeyNew,
@@ -85,6 +87,10 @@ var GlobalkeyBindings = map[KeyName]key.Binding{
 		key.WithKeys("?"),
 		key.WithHelp("?", "help"),
 	),
+	KeyAddProject: key.NewBinding(
+		key.WithKeys("a"),
+		key.WithHelp("a", "add project"),
+	),
 	KeyQuit: key.NewBinding(
 		key.WithKeys("q"),
 		key.WithHelp("q", "quit"),
@@ -99,7 +105,7 @@ var GlobalkeyBindings = map[KeyName]key.Binding{
 	),
 	KeyCheckout: key.NewBinding(
 		key.WithKeys("c"),
-		key.WithHelp("c", "checkout"),
+		key.WithHelp("c", "pause"),
 	),
 	KeyTab: key.NewBinding(
 		key.WithKeys("tab"),
