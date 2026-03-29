@@ -18,7 +18,7 @@ const (
 	KeySubmit
 
 	KeyTab        // Tab is a special keybinding for switching between panes.
-	KeySubmitName // SubmitName is a special keybinding for submitting the name of a new instance.
+	KeySubmitName // SubmitName is a special keybinding for submitting a creation form.
 
 	KeyCheckout
 	KeyResume
@@ -114,6 +114,6 @@ var GlobalkeyBindings = map[KeyName]key.Binding{
 
 	KeySubmitName: key.NewBinding(
 		key.WithKeys("enter"),
-		key.WithHelp("enter", "submit name"),
+		key.WithHelp("enter", "submit"),
 	),
 }

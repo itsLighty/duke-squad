@@ -18,15 +18,14 @@ import (
 	"github.com/charmbracelet/bubbles/spinner"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
-	"github.com/mattn/go-runewidth"
 )
 
 const GlobalInstanceLimit = 10
 
 // Run is the main entrypoint into the application.
-func Run(ctx context.Context, program string, autoYes bool) error {
+func Run(ctx context.Context, program string, autoYes bool, programOverridden bool) error {
 	p := tea.NewProgram(
-		newHome(ctx, program, autoYes),
+		newHome(ctx, program, autoYes, programOverridden),
 		tea.WithAltScreen(),
 		tea.WithMouseCellMotion(), // Mouse scroll
 	)
@@ -38,10 +37,8 @@ type state int
 
 const (
 	stateDefault state = iota
-	// stateNew is the state when the user is creating a new instance.
-	stateNew
-	// statePrompt is the state when the user is entering a prompt.
-	statePrompt
+	// stateCreate is the state when the user is creating a new session.
+	stateCreate
 	// stateHelp is the state when a help screen is displayed.
 	stateHelp
 	// stateConfirm is the state when a confirmation modal is displayed.
@@ -55,6 +52,8 @@ type home struct {
 
 	program string
 	autoYes bool
+	// programOverridden is true when the app was started with -p/--program.
+	programOverridden bool
 
 	// storage is the interface for saving/loading data to/from the app's state
 	storage *session.Storage
@@ -67,12 +66,6 @@ type home struct {
 
 	// state is the current discrete state of the application
 	state state
-	// newInstanceFinalizer is called when the state is stateNew and then you press enter.
-	// It registers the new instance in the list after the instance has been started.
-	newInstanceFinalizer func()
-
-	// promptAfterName tracks if we should enter prompt mode after naming
-	promptAfterName bool
 
 	// keySent is used to manage underlining menu items
 	keySent bool
@@ -103,7 +96,7 @@ type home struct {
 	confirmationOverlay *overlay.ConfirmationOverlay
 }
 
-func newHome(ctx context.Context, program string, autoYes bool) *home {
+func newHome(ctx context.Context, program string, autoYes bool, programOverridden bool) *home {
 	// Load application config
 	appConfig := config.LoadConfig()
 
@@ -118,17 +111,18 @@ func newHome(ctx context.Context, program string, autoYes bool) *home {
 	}
 
 	h := &home{
-		ctx:          ctx,
-		spinner:      spinner.New(spinner.WithSpinner(spinner.MiniDot)),
-		menu:         ui.NewMenu(),
-		tabbedWindow: ui.NewTabbedWindow(ui.NewPreviewPane(), ui.NewDiffPane(), ui.NewTerminalPane()),
-		errBox:       ui.NewErrBox(),
-		storage:      storage,
-		appConfig:    appConfig,
-		program:      program,
-		autoYes:      autoYes,
-		state:        stateDefault,
-		appState:     appState,
+		ctx:               ctx,
+		spinner:           spinner.New(spinner.WithSpinner(spinner.MiniDot)),
+		menu:              ui.NewMenu(),
+		tabbedWindow:      ui.NewTabbedWindow(ui.NewPreviewPane(), ui.NewDiffPane(), ui.NewTerminalPane()),
+		errBox:            ui.NewErrBox(),
+		storage:           storage,
+		appConfig:         appConfig,
+		program:           program,
+		autoYes:           autoYes,
+		programOverridden: programOverridden,
+		state:             stateDefault,
+		appState:          appState,
 	}
 	h.list = ui.NewList(&h.spinner, autoYes)
 
@@ -306,6 +300,10 @@ func (m *home) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, tea.Batch(m.handleError(msg.err), m.instanceChanged())
 		}
 
+		if msg.finalize != nil {
+			msg.finalize()
+		}
+
 		// Save after successful start
 		if err := m.storage.SaveInstances(m.list.GetInstances()); err != nil {
 			return m, m.handleError(err)
@@ -314,21 +312,15 @@ func (m *home) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			msg.instance.AutoYes = true
 		}
 
-		if msg.promptAfterName {
-			m.state = statePrompt
-			m.menu.SetState(ui.StatePrompt)
-			m.textInputOverlay = m.newPromptOverlay()
-		} else {
-			// If instance has a prompt (set from Shift+N flow), send it now
-			if msg.instance.Prompt != "" {
-				if err := msg.instance.SendPrompt(msg.instance.Prompt); err != nil {
-					log.ErrorLog.Printf("failed to send prompt: %v", err)
-				}
-				msg.instance.Prompt = ""
+		// If instance has a prompt (set from Shift+N flow), send it now.
+		if msg.instance.Prompt != "" {
+			if err := msg.instance.SendPrompt(msg.instance.Prompt); err != nil {
+				log.ErrorLog.Printf("failed to send prompt: %v", err)
 			}
-			m.menu.SetState(ui.StateDefault)
-			m.showHelpScreen(helpStart(msg.instance), nil)
+			msg.instance.Prompt = ""
 		}
+		m.menu.SetState(ui.StateDefault)
+		m.showHelpScreen(helpStart(msg.instance), nil)
 
 		return m, tea.Batch(tea.WindowSize(), m.instanceChanged())
 	case spinner.TickMsg:
@@ -353,7 +345,7 @@ func (m *home) handleMenuHighlighting(msg tea.KeyMsg) (cmd tea.Cmd, returnEarly 
 		m.keySent = false
 		return nil, false
 	}
-	if m.state == statePrompt || m.state == stateHelp || m.state == stateConfirm {
+	if m.state == stateCreate || m.state == stateHelp || m.state == stateConfirm {
 		return nil, false
 	}
 	// If it's in the global keymap, we should try to highlight it.
@@ -370,8 +362,7 @@ func (m *home) handleMenuHighlighting(msg tea.KeyMsg) (cmd tea.Cmd, returnEarly 
 	}
 
 	// Skip the menu highlighting if the key is not in the map or we are using the shift up and down keys.
-	// TODO: cleanup: when you press enter on stateNew, we use keys.KeySubmitName. We should unify the keymap.
-	if name == keys.KeyEnter && m.state == stateNew {
+	if name == keys.KeyEnter && m.state == stateCreate {
 		name = keys.KeySubmitName
 	}
 	m.keySent = true
@@ -390,164 +381,26 @@ func (m *home) handleKeyPress(msg tea.KeyMsg) (mod tea.Model, cmd tea.Cmd) {
 		return m.handleHelpState(msg)
 	}
 
-	if m.state == stateNew {
-		// Handle quit commands first. Don't handle q because the user might want to type that.
-		if msg.String() == "ctrl+c" {
-			m.state = stateDefault
-			m.promptAfterName = false
-			m.list.Kill()
-			return m, tea.Sequence(
-				tea.WindowSize(),
-				func() tea.Msg {
-					m.menu.SetState(ui.StateDefault)
-					return nil
-				},
-			)
-		}
-
-		instance := m.list.GetInstances()[m.list.NumInstances()-1]
-		switch msg.Type {
-		// Start the instance (enable previews etc) and go back to the main menu state.
-		case tea.KeyEnter:
-			if len(instance.Title) == 0 {
-				return m, m.handleError(fmt.Errorf("title cannot be empty"))
-			}
-
-			// If promptAfterName, show prompt+branch overlay before starting
-			if m.promptAfterName {
-				m.promptAfterName = false
-				m.state = statePrompt
-				m.menu.SetState(ui.StatePrompt)
-				m.textInputOverlay = m.newPromptOverlay()
-				// Trigger initial branch search (no debounce, version 0)
-				initialSearch := m.runBranchSearch("", m.textInputOverlay.BranchFilterVersion())
-				return m, tea.Batch(tea.WindowSize(), initialSearch)
-			}
-
-			// Set Loading status and finalize into the list immediately
-			instance.SetStatus(session.Loading)
-			m.newInstanceFinalizer()
-			m.promptAfterName = false
-			m.state = stateDefault
-			m.menu.SetState(ui.StateDefault)
-
-			// Return a tea.Cmd that runs instance.Start in the background
-			startCmd := func() tea.Msg {
-				err := instance.Start(true)
-				return instanceStartedMsg{
-					instance:        instance,
-					err:             err,
-					promptAfterName: false,
-				}
-			}
-
-			return m, tea.Batch(tea.WindowSize(), m.instanceChanged(), startCmd)
-		case tea.KeyRunes:
-			if runewidth.StringWidth(instance.Title) >= 32 {
-				return m, m.handleError(fmt.Errorf("title cannot be longer than 32 characters"))
-			}
-			if err := instance.SetTitle(instance.Title + string(msg.Runes)); err != nil {
-				return m, m.handleError(err)
-			}
-		case tea.KeyBackspace:
-			runes := []rune(instance.Title)
-			if len(runes) == 0 {
-				return m, nil
-			}
-			if err := instance.SetTitle(string(runes[:len(runes)-1])); err != nil {
-				return m, m.handleError(err)
-			}
-		case tea.KeySpace:
-			if err := instance.SetTitle(instance.Title + " "); err != nil {
-				return m, m.handleError(err)
-			}
-		case tea.KeyEsc:
-			m.list.Kill()
-			m.state = stateDefault
-			m.instanceChanged()
-
-			return m, tea.Sequence(
-				tea.WindowSize(),
-				func() tea.Msg {
-					m.menu.SetState(ui.StateDefault)
-					return nil
-				},
-			)
-		default:
-		}
-		return m, nil
-	} else if m.state == statePrompt {
+	if m.state == stateCreate {
 		// Handle cancel via ctrl+c before delegating to the overlay
 		if msg.String() == "ctrl+c" {
-			return m, m.cancelPromptOverlay()
+			return m, m.cancelCreateOverlay()
 		}
 
-		// Use the new TextInputOverlay component to handle all key events
+		// Use the new TextInputOverlay component to handle all key events.
 		shouldClose, branchFilterChanged := m.textInputOverlay.HandleKeyPress(msg)
 
-		// Check if the form was submitted or canceled
+		// Check if the form was submitted or canceled.
 		if shouldClose {
-			selected := m.list.GetSelectedInstance()
-			if selected == nil {
-				return m, nil
-			}
-
 			if m.textInputOverlay.IsCanceled() {
-				return m, m.cancelPromptOverlay()
+				return m, m.cancelCreateOverlay()
 			}
 
 			if m.textInputOverlay.IsSubmitted() {
-				prompt := m.textInputOverlay.GetValue()
-				selectedBranch := m.textInputOverlay.GetSelectedBranch()
-				selectedProgram := m.textInputOverlay.GetSelectedProgram()
-
-				if !selected.Started() {
-					// Shift+N flow: instance not started yet — set branch, start, then send prompt
-					if selectedBranch != "" {
-						selected.SetSelectedBranch(selectedBranch)
-					}
-					if selectedProgram != "" {
-						selected.Program = selectedProgram
-					}
-					selected.Prompt = prompt
-
-					// Finalize into list and start
-					selected.SetStatus(session.Loading)
-					m.newInstanceFinalizer()
-					m.textInputOverlay = nil
-					m.state = stateDefault
-					m.menu.SetState(ui.StateDefault)
-
-					startCmd := func() tea.Msg {
-						err := selected.Start(true)
-						return instanceStartedMsg{
-							instance:        selected,
-							err:             err,
-							promptAfterName: false,
-							selectedBranch:  selectedBranch,
-						}
-					}
-
-					return m, tea.Batch(tea.WindowSize(), m.instanceChanged(), startCmd)
-				}
-
-				// Regular flow: instance already running, just send prompt
-				if err := selected.SendPrompt(prompt); err != nil {
-					return m, m.handleError(err)
-				}
+				return m, m.submitCreateSession()
 			}
 
-			// Close the overlay and reset state
-			m.textInputOverlay = nil
-			m.state = stateDefault
-			return m, tea.Sequence(
-				tea.WindowSize(),
-				func() tea.Msg {
-					m.menu.SetState(ui.StateDefault)
-					m.showHelpScreen(helpStart(selected), nil)
-					return nil
-				},
-			)
+			return m, nil
 		}
 
 		// Schedule a debounced branch search if the filter changed
@@ -611,49 +464,13 @@ func (m *home) handleKeyPress(msg tea.KeyMsg) (mod tea.Model, cmd tea.Cmd) {
 				fmt.Errorf("you can't create more than %d instances", GlobalInstanceLimit))
 		}
 
-		// Start a background fetch so branches are up to date by the time the picker opens
-		fetchCmd := func() tea.Msg {
-			currentDir, _ := os.Getwd()
-			git.FetchBranches(currentDir)
-			return nil
-		}
-
-		instance, err := session.NewInstance(session.InstanceOptions{
-			Title:   "",
-			Path:    ".",
-			Program: m.program,
-		})
-		if err != nil {
-			return m, m.handleError(err)
-		}
-
-		m.newInstanceFinalizer = m.list.AddInstance(instance)
-		m.list.SetSelectedInstance(m.list.NumInstances() - 1)
-		m.state = stateNew
-		m.menu.SetState(ui.StateNewInstance)
-		m.promptAfterName = true
-
-		return m, fetchCmd
+		return m, m.beginCreateSession(true)
 	case keys.KeyNew:
 		if m.list.NumInstances() >= GlobalInstanceLimit {
 			return m, m.handleError(
 				fmt.Errorf("you can't create more than %d instances", GlobalInstanceLimit))
 		}
-		instance, err := session.NewInstance(session.InstanceOptions{
-			Title:   "",
-			Path:    ".",
-			Program: m.program,
-		})
-		if err != nil {
-			return m, m.handleError(err)
-		}
-
-		m.newInstanceFinalizer = m.list.AddInstance(instance)
-		m.list.SetSelectedInstance(m.list.NumInstances() - 1)
-		m.state = stateNew
-		m.menu.SetState(ui.StateNewInstance)
-
-		return m, nil
+		return m, m.beginCreateSession(false)
 	case keys.KeyUp:
 		m.list.Up()
 		return m, m.instanceChanged()
@@ -839,10 +656,9 @@ type previewTickMsg struct{}
 type instanceChangedMsg struct{}
 
 type instanceStartedMsg struct {
-	instance        *session.Instance
-	err             error
-	promptAfterName bool
-	selectedBranch  string
+	instance *session.Instance
+	err      error
+	finalize func()
 }
 
 // branchSearchDebounceMsg fires after the debounce interval to trigger a search.
@@ -968,27 +784,6 @@ func (m *home) handleError(err error) tea.Cmd {
 	}
 }
 
-func (m *home) newPromptOverlay() *overlay.TextInputOverlay {
-	return overlay.NewTextInputOverlayWithBranchPicker("Enter prompt", "", m.appConfig.GetProfiles())
-}
-
-// cancelPromptOverlay cancels the prompt overlay, cleaning up unstarted instances.
-func (m *home) cancelPromptOverlay() tea.Cmd {
-	selected := m.list.GetSelectedInstance()
-	if selected != nil && !selected.Started() {
-		m.list.Kill()
-	}
-	m.textInputOverlay = nil
-	m.state = stateDefault
-	return tea.Sequence(
-		tea.WindowSize(),
-		func() tea.Msg {
-			m.menu.SetState(ui.StateDefault)
-			return nil
-		},
-	)
-}
-
 // confirmAction shows a confirmation modal and stores the action to execute on confirm
 func (m *home) confirmAction(message string, action tea.Cmd) tea.Cmd {
 	m.state = stateConfirm
@@ -1026,7 +821,7 @@ func (m *home) View() string {
 		m.errBox.String(),
 	)
 
-	if m.state == statePrompt {
+	if m.state == stateCreate {
 		if m.textInputOverlay == nil {
 			log.ErrorLog.Printf("text input overlay is nil")
 		}

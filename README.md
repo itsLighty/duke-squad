@@ -66,7 +66,7 @@ Available Commands:
 Flags:
   -y, --autoyes          [experimental] If enabled, all instances will automatically accept prompts for claude code & aider
   -h, --help             help for claude-squad
-  -p, --program string   Program to run in new instances (e.g. 'aider --model ollama_chat/gemma3:1b')
+  -p, --program string   Preselected provider/program for new sessions in this run (e.g. 'codex')
 ```
 
 Run the application with:
@@ -81,10 +81,11 @@ NOTE: The default program is `claude` and we recommend using the latest version.
 <b>Using Claude Squad with other AI assistants:</b>
 - For [Codex](https://github.com/openai/codex): Set your API key with `export OPENAI_API_KEY=<your_key>`
 - Launch with specific assistants:
-   - Codex: `cs -p "codex"`
+   - Codex: `cs -p "codex"` (preselects Codex when creating new sessions)
    - Aider: `cs -p "aider ..."`
    - Gemini: `cs -p "gemini"`
-- Make this the default, by modifying the config file (locate with `cs debug`)
+- Make multiple providers available in the new-session picker by configuring profiles
+- Make one of them the default by modifying the config file (locate with `cs debug`)
 
 <br />
 
@@ -116,7 +117,7 @@ Claude Squad stores its configuration in `~/.claude-squad/config.json`. You can 
 
 #### Profiles
 
-Profiles let you define multiple named program configurations and switch between them when creating a new session. When more than one profile is defined, the session creation overlay shows a profile picker that you can navigate with `←`/`→`.
+Profiles let you define multiple named program configurations and switch between them when creating any new session. When more than one profile is defined, both `n` and `N` show a provider picker that you can navigate with `←`/`→`.
 
 To configure profiles, add a `profiles` array to your config file and set `default_program` to the name of the profile to select by default:
 
@@ -139,6 +140,10 @@ Each profile has two fields:
 | `program` | Shell command used to launch the agent for that profile  |
 
 If no profiles are defined, Claude Squad uses `default_program` directly as the launch command (the default is `claude`).
+
+#### Auto-Yes
+
+Newly created configs default `auto_yes` to `true`. Existing configs are left unchanged. To opt out, set `"auto_yes": false` in your config file.
 
 ### FAQs
 

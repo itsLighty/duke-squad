@@ -71,7 +71,7 @@ var (
 				log.ErrorLog.Printf("failed to stop daemon: %v", err)
 			}
 
-			return app.Run(ctx, program, autoYes)
+			return app.Run(ctx, program, autoYes, programFlag != "")
 		},
 	}
 
@@ -145,7 +145,7 @@ var (
 
 func init() {
 	rootCmd.Flags().StringVarP(&programFlag, "program", "p", "",
-		"Program to run in new instances (e.g. 'aider --model ollama_chat/gemma3:1b')")
+		"Preselected provider/program for new sessions in this run (e.g. 'codex')")
 	rootCmd.Flags().BoolVarP(&autoYesFlag, "autoyes", "y", false,
 		"[experimental] If enabled, all instances will automatically accept prompts")
 	rootCmd.Flags().BoolVar(&daemonFlag, "daemon", false, "Run a program that loads all sessions"+

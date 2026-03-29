@@ -91,7 +91,7 @@ func DefaultConfig() *Config {
 
 	return &Config{
 		DefaultProgram:     program,
-		AutoYes:            false,
+		AutoYes:            true,
 		DaemonPollInterval: 1000,
 		BranchPrefix: func() string {
 			user, err := user.Current()

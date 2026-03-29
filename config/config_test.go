@@ -104,7 +104,7 @@ func TestDefaultConfig(t *testing.T) {
 
 		assert.NotNil(t, config)
 		assert.NotEmpty(t, config.DefaultProgram)
-		assert.False(t, config.AutoYes)
+		assert.True(t, config.AutoYes)
 		assert.Equal(t, 1000, config.DaemonPollInterval)
 		assert.NotEmpty(t, config.BranchPrefix)
 		assert.True(t, strings.HasSuffix(config.BranchPrefix, "/"))
@@ -137,7 +137,7 @@ func TestLoadConfig(t *testing.T) {
 
 		assert.NotNil(t, config)
 		assert.NotEmpty(t, config.DefaultProgram)
-		assert.False(t, config.AutoYes)
+		assert.True(t, config.AutoYes)
 		assert.Equal(t, 1000, config.DaemonPollInterval)
 		assert.NotEmpty(t, config.BranchPrefix)
 	})
@@ -197,7 +197,7 @@ func TestLoadConfig(t *testing.T) {
 		// Should return default config when JSON is invalid
 		assert.NotNil(t, config)
 		assert.NotEmpty(t, config.DefaultProgram)
-		assert.False(t, config.AutoYes)                  // Default value
+		assert.True(t, config.AutoYes)                   // Default value
 		assert.Equal(t, 1000, config.DaemonPollInterval) // Default value
 	})
 }

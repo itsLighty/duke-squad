@@ -25,6 +25,14 @@ func NewProfilePicker(profiles []config.Profile) *ProfilePicker {
 	}
 }
 
+// SetSelectedIndex updates the selection if idx is within bounds.
+func (pp *ProfilePicker) SetSelectedIndex(idx int) {
+	if idx < 0 || idx >= len(pp.profiles) {
+		return
+	}
+	pp.cursor = idx
+}
+
 // Focus gives the profile picker focus.
 func (pp *ProfilePicker) Focus() {
 	pp.focused = true
@@ -86,7 +94,7 @@ var (
 // Render renders the profile picker.
 func (pp *ProfilePicker) Render() string {
 	var s strings.Builder
-	s.WriteString(ppLabelStyle.Render("Profile"))
+	s.WriteString(ppLabelStyle.Render("Provider"))
 
 	if pp.HasMultiple() && pp.focused {
 		s.WriteString(ppDimStyle.Render("  ←/→ to change"))
