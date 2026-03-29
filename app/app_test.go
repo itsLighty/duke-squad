@@ -359,6 +359,96 @@ func TestKillConfirmationRemovesFolderSession(t *testing.T) {
 	require.Empty(t, project.Sessions)
 }
 
+func TestAddProjectCancelResetsMenuState(t *testing.T) {
+	spin := spinner.New(spinner.WithSpinner(spinner.MiniDot))
+	list := ui.NewList(&spin, false)
+	storage, err := session.NewStorage(&fakeAppState{})
+	require.NoError(t, err)
+
+	h := &home{
+		ctx:              context.Background(),
+		state:            stateAddProject,
+		appConfig:        config.DefaultConfig(),
+		list:             list,
+		menu:             ui.NewMenu(),
+		storage:          storage,
+		textInputOverlay: overlay.NewProjectPathOverlay("Project folder", ""),
+	}
+	h.menu.SetSize(120, 1)
+	h.menu.SetState(ui.StatePrompt)
+
+	model, cmd := h.handleKeyPress(tea.KeyMsg{Type: tea.KeyCtrlC})
+	require.NotNil(t, cmd)
+
+	homeModel, ok := model.(*home)
+	require.True(t, ok)
+	assert.Equal(t, stateDefault, homeModel.state)
+	assert.Nil(t, homeModel.textInputOverlay)
+	assert.Contains(t, homeModel.menu.String(), "add project")
+	assert.NotContains(t, homeModel.menu.String(), "submit")
+}
+
+func TestAddProjectSuccessResetsMenuState(t *testing.T) {
+	spin := spinner.New(spinner.WithSpinner(spinner.MiniDot))
+	list := ui.NewList(&spin, false)
+	storage, err := session.NewStorage(&fakeAppState{})
+	require.NoError(t, err)
+
+	h := &home{
+		ctx:              context.Background(),
+		state:            stateAddProject,
+		appConfig:        config.DefaultConfig(),
+		list:             list,
+		menu:             ui.NewMenu(),
+		storage:          storage,
+		tabbedWindow:     ui.NewTabbedWindow(ui.NewPreviewPane(), ui.NewDiffPane(), ui.NewTerminalPane()),
+		textInputOverlay: overlay.NewProjectPathOverlay("Project folder", t.TempDir()),
+	}
+	h.menu.SetSize(120, 1)
+	h.menu.SetState(ui.StatePrompt)
+
+	model, cmd := h.handleKeyPress(tea.KeyMsg{Type: tea.KeyEnter})
+	require.NotNil(t, model)
+	require.Nil(t, cmd)
+
+	model, cmd = h.handleKeyPress(tea.KeyMsg{Type: tea.KeyEnter})
+	require.NotNil(t, cmd)
+
+	homeModel, ok := model.(*home)
+	require.True(t, ok)
+	assert.Equal(t, stateDefault, homeModel.state)
+	assert.Nil(t, homeModel.textInputOverlay)
+	require.Len(t, homeModel.list.GetProjects(), 1)
+	assert.Contains(t, homeModel.menu.String(), "add project")
+	assert.NotContains(t, homeModel.menu.String(), "submit")
+}
+
+func TestAddProjectUsesLaunchDirAsDefaultPath(t *testing.T) {
+	spin := spinner.New(spinner.WithSpinner(spinner.MiniDot))
+	list := ui.NewList(&spin, false)
+
+	launchDir := t.TempDir()
+	h := &home{
+		ctx:       context.Background(),
+		state:     stateDefault,
+		keySent:   true,
+		launchDir: launchDir,
+		appConfig: config.DefaultConfig(),
+		list:      list,
+		menu:      ui.NewMenu(),
+	}
+
+	model, cmd := h.handleKeyPress(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("a")})
+	require.NotNil(t, model)
+	require.NotNil(t, cmd)
+
+	homeModel, ok := model.(*home)
+	require.True(t, ok)
+	require.NotNil(t, homeModel.textInputOverlay)
+	assert.Equal(t, stateAddProject, homeModel.state)
+	assert.Equal(t, launchDir, homeModel.textInputOverlay.GetPathValue())
+}
+
 // TestConfirmActionWithDifferentTypes tests that confirmAction works with different action types
 func TestConfirmActionWithDifferentTypes(t *testing.T) {
 	h := &home{

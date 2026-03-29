@@ -72,6 +72,9 @@ type home struct {
 	// keySent is used to manage underlining menu items
 	keySent bool
 
+	// launchDir is the directory where the app was started.
+	launchDir string
+
 	// instanceStarting is true while a background instance start is in progress.
 	// Prevents double-submission and guards against interacting with a not-yet-started instance.
 	instanceStarting bool
@@ -146,6 +149,7 @@ func newHome(ctx context.Context, program string, autoYes bool, programOverridde
 	}
 
 	if cwd, err := os.Getwd(); err == nil {
+		h.launchDir = cwd
 		h.list.SelectProjectForPath(cwd)
 	}
 
@@ -398,6 +402,7 @@ func (m *home) handleKeyPress(msg tea.KeyMsg) (mod tea.Model, cmd tea.Cmd) {
 		if msg.String() == "ctrl+c" {
 			m.textInputOverlay = nil
 			m.state = stateDefault
+			m.menu.SetState(ui.StateDefault)
 			return m, tea.WindowSize()
 		}
 
@@ -408,13 +413,14 @@ func (m *home) handleKeyPress(msg tea.KeyMsg) (mod tea.Model, cmd tea.Cmd) {
 		if m.textInputOverlay.IsCanceled() {
 			m.textInputOverlay = nil
 			m.state = stateDefault
+			m.menu.SetState(ui.StateDefault)
 			return m, tea.WindowSize()
 		}
 		if !m.textInputOverlay.IsSubmitted() {
 			return m, nil
 		}
 
-		project, err := session.NewProject(m.textInputOverlay.GetPromptValue())
+		project, err := session.NewProject(m.textInputOverlay.GetPathValue())
 		if err != nil {
 			return m, m.handleError(err)
 		}
@@ -427,6 +433,7 @@ func (m *home) handleKeyPress(msg tea.KeyMsg) (mod tea.Model, cmd tea.Cmd) {
 		m.list.AddProject(project)
 		m.textInputOverlay = nil
 		m.state = stateDefault
+		m.menu.SetState(ui.StateDefault)
 		if err := m.saveProjects(); err != nil {
 			return m, m.handleError(err)
 		}
@@ -481,7 +488,7 @@ func (m *home) handleKeyPress(msg tea.KeyMsg) (mod tea.Model, cmd tea.Cmd) {
 	case keys.KeyAddProject:
 		m.state = stateAddProject
 		m.menu.SetState(ui.StatePrompt)
-		m.textInputOverlay = overlay.NewTextInputOverlay("Add project folder", "")
+		m.textInputOverlay = overlay.NewProjectPathOverlay("Project folder", m.launchDir)
 		return m, tea.WindowSize()
 	case keys.KeyPrompt:
 		if m.list.NumInstances() >= GlobalInstanceLimit {

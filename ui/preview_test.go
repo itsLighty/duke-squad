@@ -304,6 +304,27 @@ func TestPreviewShowsRestartFallbackForStoppedSession(t *testing.T) {
 	require.Contains(t, previewPane.previewState.text, "Press 'r' to restart")
 }
 
+func TestPreviewShowsProjectSummaryWithoutFullPath(t *testing.T) {
+	previewPane := NewPreviewPane()
+	previewPane.SetSize(80, 30)
+
+	project := &session.Project{
+		ID:       "proj-1",
+		Name:     "claude-squad",
+		RootPath: "/Users/denizsonmez/Desktop/Work/claude-squad",
+		Kind:     session.ProjectKindGit,
+		Sessions: []*session.Instance{{ID: "sess-1", Title: "one"}, {ID: "sess-2", Title: "two"}},
+	}
+
+	err := previewPane.UpdateContent(project, nil)
+	require.NoError(t, err)
+	require.True(t, previewPane.previewState.fallback)
+	require.Contains(t, previewPane.previewState.text, "claude-squad")
+	require.Contains(t, previewPane.previewState.text, "Git project • 2 sessions")
+	require.Contains(t, previewPane.previewState.text, "Press 'n' to start a session here.")
+	require.NotContains(t, previewPane.previewState.text, project.RootPath)
+}
+
 // MockPtyFactory for testing tmux sessions
 type MockPtyFactory struct {
 	t       *testing.T

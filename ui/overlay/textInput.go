@@ -45,6 +45,7 @@ type TextInputOverlay struct {
 	height        int
 	profilePicker *ProfilePicker
 	branchPicker  *BranchPicker
+	pathPicker    *PathPicker
 	hasTitleInput bool
 	hasPrompt     bool
 }
@@ -56,6 +57,15 @@ func NewTextInputOverlay(title string, initialValue string) *TextInputOverlay {
 		promptInput: promptInput,
 		Title:       title,
 		hasPrompt:   true,
+	}
+	overlay.updateFocusState()
+	return overlay
+}
+
+func NewProjectPathOverlay(title string, initialValue string) *TextInputOverlay {
+	overlay := &TextInputOverlay{
+		Title:      title,
+		pathPicker: NewPathPicker(initialValue),
 	}
 	overlay.updateFocusState()
 	return overlay
@@ -134,6 +144,9 @@ func (t *TextInputOverlay) SetSize(width, height int) {
 		promptHeight := max(4, min(8, height/3))
 		t.promptInput.SetHeight(promptHeight)
 	}
+	if t.pathPicker != nil {
+		t.pathPicker.SetWidth(width - 6)
+	}
 	if t.branchPicker != nil {
 		t.branchPicker.SetWidth(width - 6)
 	}
@@ -144,7 +157,7 @@ func (t *TextInputOverlay) SetSize(width, height int) {
 
 // Init initializes the text input overlay model.
 func (t *TextInputOverlay) Init() tea.Cmd {
-	return textarea.Blink
+	return tea.Batch(textinput.Blink, textarea.Blink)
 }
 
 // View renders the model's view.
@@ -201,6 +214,20 @@ func (t *TextInputOverlay) branchPickerIndex() int {
 	return idx
 }
 
+func (t *TextInputOverlay) pathPickerIndex() int {
+	if t.pathPicker == nil {
+		return -1
+	}
+	idx := 0
+	if t.hasTitleInput {
+		idx++
+	}
+	if t.profilePicker != nil && t.profilePicker.HasMultiple() {
+		idx++
+	}
+	return idx
+}
+
 func (t *TextInputOverlay) enterButtonIndex() int {
 	idx := 0
 	if t.hasTitleInput {
@@ -210,6 +237,9 @@ func (t *TextInputOverlay) enterButtonIndex() int {
 		idx++
 	}
 	if t.hasPrompt {
+		idx++
+	}
+	if t.pathPicker != nil {
 		idx++
 	}
 	if t.branchPicker != nil {
@@ -232,6 +262,10 @@ func (t *TextInputOverlay) isProfilePicker() bool {
 
 func (t *TextInputOverlay) isPromptInput() bool {
 	return t.hasPrompt && t.FocusIndex == t.promptInputIndex()
+}
+
+func (t *TextInputOverlay) isPathPicker() bool {
+	return t.pathPicker != nil && t.FocusIndex == t.pathPickerIndex()
 }
 
 func (t *TextInputOverlay) isBranchPicker() bool {
@@ -262,6 +296,13 @@ func (t *TextInputOverlay) updateFocusState() {
 			t.promptInput.Blur()
 		}
 	}
+	if t.pathPicker != nil {
+		if t.isPathPicker() {
+			t.pathPicker.Focus()
+		} else {
+			t.pathPicker.Blur()
+		}
+	}
 	if t.branchPicker != nil {
 		if t.isBranchPicker() {
 			t.branchPicker.Focus()
@@ -283,6 +324,9 @@ func (t *TextInputOverlay) updateFocusState() {
 func (t *TextInputOverlay) HandleKeyPress(msg tea.KeyMsg) (bool, bool) {
 	switch msg.Type {
 	case tea.KeyTab:
+		if t.isPathPicker() && t.pathPicker.AcceptSuggestion() {
+			return false, false
+		}
 		t.setFocusIndex((t.FocusIndex + 1) % t.focusStops())
 		return false, false
 	case tea.KeyShiftTab:
@@ -308,6 +352,9 @@ func (t *TextInputOverlay) HandleKeyPress(msg tea.KeyMsg) (bool, bool) {
 		case t.isTitleInput():
 			t.setFocusIndex(min(t.FocusIndex+1, t.enterButtonIndex()))
 			return false, false
+		case t.isPathPicker():
+			t.setFocusIndex(min(t.FocusIndex+1, t.enterButtonIndex()))
+			return false, false
 		case t.isPromptInput():
 			t.promptInput, _ = t.promptInput.Update(msg)
 			return false, false
@@ -319,6 +366,9 @@ func (t *TextInputOverlay) HandleKeyPress(msg tea.KeyMsg) (bool, bool) {
 			return false, false
 		case t.isPromptInput():
 			t.promptInput, _ = t.promptInput.Update(msg)
+			return false, false
+		case t.isPathPicker():
+			t.pathPicker.HandleKeyPress(msg)
 			return false, false
 		case t.isProfilePicker():
 			if msg.Type == tea.KeyLeft || msg.Type == tea.KeyRight {
@@ -343,10 +393,20 @@ func (t *TextInputOverlay) GetTitleValue() string {
 
 // GetPromptValue returns the current prompt value.
 func (t *TextInputOverlay) GetPromptValue() string {
+	if t.pathPicker != nil {
+		return t.pathPicker.Value()
+	}
 	if !t.hasPrompt {
 		return ""
 	}
 	return t.promptInput.Value()
+}
+
+func (t *TextInputOverlay) GetPathValue() string {
+	if t.pathPicker == nil {
+		return ""
+	}
+	return t.pathPicker.Value()
 }
 
 // GetSelectedBranch returns the selected branch name from the branch picker.
@@ -433,6 +493,8 @@ func (t *TextInputOverlay) Render() string {
 	}
 	if t.hasPrompt {
 		sections = append(sections, tiTitleStyle.Render(t.Title)+"\n"+t.promptInput.View())
+	} else if t.pathPicker != nil {
+		sections = append(sections, t.pathPicker.Render(t.Title))
 	} else if t.Title != "" {
 		sections = append(sections, tiTitleStyle.Render(t.Title))
 	}

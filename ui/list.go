@@ -60,7 +60,7 @@ const (
 )
 
 type Selection struct {
-	Project *session.Project
+	Project  *session.Project
 	Instance *session.Instance
 }
 
@@ -157,15 +157,15 @@ func (r *InstanceRenderer) renderProject(project *session.Project, selected bool
 		titleText = runewidth.Truncate(titleText, r.width-5, "...")
 	}
 
-	pathText := project.RootPath
-	if runewidth.StringWidth(pathText) > r.width-2 {
-		pathText = runewidth.Truncate(pathText, r.width-5, "...")
+	metaText := projectMetaText(project)
+	if runewidth.StringWidth(metaText) > r.width-2 {
+		metaText = runewidth.Truncate(metaText, r.width-5, "...")
 	}
 
 	return lipgloss.JoinVertical(
 		lipgloss.Left,
 		titleS.Render(titleText),
-		descS.Render(pathText),
+		descS.Render(metaText),
 	)
 }
 
@@ -335,11 +335,11 @@ func (l *List) AddSession(projectID string, instance *session.Instance) func() {
 // AddInstance is kept for compatibility with older tests.
 func (l *List) AddInstance(instance *session.Instance) func() {
 	project := &session.Project{
-		ID:        newCompatProjectID(instance),
-		Name:      filepathBase(instance.Path),
-		RootPath:  instance.Path,
-		Kind:      instance.ProjectKind,
-		Sessions:  []*session.Instance{},
+		ID:       newCompatProjectID(instance),
+		Name:     filepathBase(instance.Path),
+		RootPath: instance.Path,
+		Kind:     instance.ProjectKind,
+		Sessions: []*session.Instance{},
 	}
 	l.AddProject(project)
 	return l.AddSession(project.ID, instance)
