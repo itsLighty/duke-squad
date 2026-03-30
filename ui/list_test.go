@@ -51,3 +51,28 @@ func TestProjectRowRenderIsCompact(t *testing.T) {
 	require.False(t, strings.HasPrefix(lines[0], " "))
 	require.Contains(t, lines[1], "Git project")
 }
+
+func TestSessionRowsRenderNestedUnderProject(t *testing.T) {
+	spin := spinner.New(spinner.WithSpinner(spinner.MiniDot))
+	list := NewList(&spin, false)
+	list.SetSize(60, 20)
+	list.SetProjects([]*session.Project{{
+		ID:   "proj-1",
+		Name: "claude-squad",
+		Kind: session.ProjectKindGit,
+		Sessions: []*session.Instance{{
+			ID:    "sess-1",
+			Title: "ship polish",
+		}},
+	}})
+
+	rendered := stripANSI(list.String())
+	for _, line := range strings.Split(rendered, "\n") {
+		if strings.Contains(line, "ship polish") {
+			require.True(t, strings.HasPrefix(line, "    └ "), "expected nested session prefix in %q", line)
+			return
+		}
+	}
+
+	t.Fatalf("session row not found in %q", rendered)
+}

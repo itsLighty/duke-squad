@@ -26,17 +26,31 @@ var removedLinesStyle = lipgloss.NewStyle().
 var pausedStyle = lipgloss.NewStyle().
 	Foreground(lipgloss.AdaptiveColor{Light: "#888888", Dark: "#888888"})
 
-var titleStyle = lipgloss.NewStyle().
+var projectTitleStyle = lipgloss.NewStyle().
+	Bold(true).
 	Foreground(lipgloss.AdaptiveColor{Light: "#1a1a1a", Dark: "#dddddd"})
 
-var listDescStyle = lipgloss.NewStyle().
+var projectMetaStyle = lipgloss.NewStyle().
 	Foreground(lipgloss.AdaptiveColor{Light: "#8A918C", Dark: "#777F79"})
 
-var selectedTitleStyle = lipgloss.NewStyle().
+var selectedProjectTitleStyle = lipgloss.NewStyle().
 	Bold(true).
 	Foreground(highlightColor)
 
-var selectedDescStyle = lipgloss.NewStyle().
+var selectedProjectMetaStyle = lipgloss.NewStyle().
+	Foreground(lipgloss.AdaptiveColor{Light: "#5E786E", Dark: "#7CB5A5"})
+
+var sessionTitleStyle = lipgloss.NewStyle().
+	Foreground(lipgloss.AdaptiveColor{Light: "#38403C", Dark: "#C5CBC7"})
+
+var sessionMetaStyle = lipgloss.NewStyle().
+	Foreground(lipgloss.AdaptiveColor{Light: "#8A918C", Dark: "#727A75"})
+
+var selectedSessionTitleStyle = lipgloss.NewStyle().
+	Bold(true).
+	Foreground(highlightColor)
+
+var selectedSessionMetaStyle = lipgloss.NewStyle().
 	Foreground(lipgloss.AdaptiveColor{Light: "#5E786E", Dark: "#7CB5A5"})
 
 var mainTitle = lipgloss.NewStyle().
@@ -134,12 +148,12 @@ func (r *InstanceRenderer) setWidth(width int) {
 }
 
 func (r *InstanceRenderer) renderProject(project *session.Project, selected bool) string {
-	titleS := titleStyle
-	descS := listDescStyle
+	titleS := projectTitleStyle
+	descS := projectMetaStyle
 	prefix := "  "
 	if selected {
-		titleS = selectedTitleStyle
-		descS = selectedDescStyle
+		titleS = selectedProjectTitleStyle
+		descS = selectedProjectMetaStyle
 		prefix = "› "
 	}
 
@@ -165,14 +179,12 @@ func (r *InstanceRenderer) renderProject(project *session.Project, selected bool
 	)
 }
 
-func (r *InstanceRenderer) renderSession(i *session.Instance, selected bool) string {
-	titleS := titleStyle
-	descS := listDescStyle
-	prefix := "  "
+func (r *InstanceRenderer) renderSession(i *session.Instance, selected bool, titlePrefix, detailPrefix string) string {
+	titleS := sessionTitleStyle
+	descS := sessionMetaStyle
 	if selected {
-		titleS = selectedTitleStyle
-		descS = selectedDescStyle
-		prefix = "› "
+		titleS = selectedSessionTitleStyle
+		descS = selectedSessionMetaStyle
 	}
 
 	var join string
@@ -185,7 +197,7 @@ func (r *InstanceRenderer) renderSession(i *session.Instance, selected bool) str
 		join = pausedStyle.Render(pausedIcon)
 	}
 
-	titleText := prefix + i.Title
+	titleText := titlePrefix + i.Title
 	widthAvail := r.width - 4
 	if widthAvail > 0 && runewidth.StringWidth(titleText) > widthAvail {
 		titleText = runewidth.Truncate(titleText, widthAvail-3, "...")
@@ -218,7 +230,7 @@ func (r *InstanceRenderer) renderSession(i *session.Instance, selected bool) str
 		)
 	}
 
-	line := prefix + location
+	line := detailPrefix + location
 	if diff != "" {
 		line += "  " + diff
 	}
@@ -256,7 +268,8 @@ func (l *List) String() string {
 		case rowProject:
 			b.WriteString(l.renderer.renderProject(row.project, i == l.selectedIdx))
 		case rowSession:
-			b.WriteString(l.renderer.renderSession(row.instance, i == l.selectedIdx))
+			titlePrefix, detailPrefix := l.sessionTreePrefix(i)
+			b.WriteString(l.renderer.renderSession(row.instance, i == l.selectedIdx, titlePrefix, detailPrefix))
 		}
 		if i != len(l.rows)-1 {
 			b.WriteString("\n")
@@ -500,6 +513,29 @@ func (l *List) rebuildRows() {
 	if l.selectedIdx >= len(l.rows) && len(l.rows) > 0 {
 		l.selectedIdx = len(l.rows) - 1
 	}
+}
+
+func (l *List) sessionTreePrefix(rowIndex int) (titlePrefix string, detailPrefix string) {
+	if rowIndex < 0 || rowIndex >= len(l.rows) {
+		return "    └ ", "      "
+	}
+
+	row := l.rows[rowIndex]
+	if row.kind != rowSession {
+		return "", ""
+	}
+
+	connector := "└"
+	detailGuide := " "
+	if rowIndex+1 < len(l.rows) {
+		next := l.rows[rowIndex+1]
+		if next.kind == rowSession && next.project == row.project {
+			connector = "├"
+			detailGuide = "│"
+		}
+	}
+
+	return "    " + connector + " ", "    " + detailGuide + " "
 }
 
 func (l *List) getSelectedRow() *listRow {
