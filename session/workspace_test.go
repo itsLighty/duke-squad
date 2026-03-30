@@ -1,12 +1,45 @@
 package session
 
 import (
+	"claude-squad/transport"
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 )
+
+type stubRunner struct {
+	combinedOutput func(spec transport.CommandSpec) ([]byte, error)
+}
+
+func (s stubRunner) Kind() transport.Kind {
+	return transport.KindSSH
+}
+
+func (s stubRunner) Target() string {
+	return "dukebot@dukebot.local"
+}
+
+func (s stubRunner) Run(spec transport.CommandSpec) error {
+	return nil
+}
+
+func (s stubRunner) Output(spec transport.CommandSpec) ([]byte, error) {
+	return nil, nil
+}
+
+func (s stubRunner) CombinedOutput(spec transport.CommandSpec) ([]byte, error) {
+	if s.combinedOutput != nil {
+		return s.combinedOutput(spec)
+	}
+	return nil, nil
+}
+
+func (s stubRunner) StartPTY(spec transport.CommandSpec) (*os.File, error) {
+	return nil, nil
+}
 
 func TestFolderWorkspaceSetupCreatesManagedGitCopy(t *testing.T) {
 	homeDir := t.TempDir()
@@ -41,4 +74,20 @@ func TestFolderWorkspaceSetupCreatesManagedGitCopy(t *testing.T) {
 	originalContent, err := os.ReadFile(sourceFile)
 	require.NoError(t, err)
 	require.Equal(t, "original", string(originalContent))
+}
+
+func TestRemoteFolderWorkspaceExistsReturnsRunnerError(t *testing.T) {
+	workspace := &remoteFolderWorkspace{
+		runner: stubRunner{
+			combinedOutput: func(spec transport.CommandSpec) ([]byte, error) {
+				return nil, fmt.Errorf("permission denied")
+			},
+		},
+		workspacePath: "/srv/managed/faceswap",
+	}
+
+	exists, err := workspace.Exists()
+
+	require.False(t, exists)
+	require.ErrorContains(t, err, "permission denied")
 }

@@ -335,11 +335,15 @@ func (l *List) AddSession(projectID string, instance *session.Instance) func() {
 // AddInstance is kept for compatibility with older tests.
 func (l *List) AddInstance(instance *session.Instance) func() {
 	project := &session.Project{
-		ID:       newCompatProjectID(instance),
-		Name:     filepathBase(instance.Path),
-		RootPath: instance.Path,
-		Kind:     instance.ProjectKind,
-		Sessions: []*session.Instance{},
+		ID:        newCompatProjectID(instance),
+		Name:      filepathBase(instance.Path),
+		RootPath:  instance.Path,
+		Kind:      instance.ProjectKind,
+		Transport: instance.ProjectTransport,
+		SSHTarget: instance.SSHTarget,
+		SSHUser:   instance.SSHUser,
+		SSHHost:   instance.SSHHost,
+		Sessions:  []*session.Instance{},
 	}
 	l.AddProject(project)
 	return l.AddSession(project.ID, instance)
@@ -456,6 +460,9 @@ func (l *List) SelectProjectForPath(path string) {
 	longestMatch := -1
 	var target *session.Project
 	for _, project := range l.projects {
+		if project.Transport != "" && project.Transport != session.ProjectTransportLocal {
+			continue
+		}
 		if path == project.RootPath || strings.HasPrefix(path, project.RootPath+string(filepath.Separator)) {
 			if len(project.RootPath) > longestMatch {
 				longestMatch = len(project.RootPath)

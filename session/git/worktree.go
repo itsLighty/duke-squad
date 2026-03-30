@@ -3,12 +3,21 @@ package git
 import (
 	"claude-squad/config"
 	"claude-squad/log"
+	"claude-squad/transport"
 	"fmt"
+	"path"
 	"path/filepath"
 	"time"
 )
 
 func getWorktreeDirectory() (string, error) {
+	return getWorktreeDirectoryForRunner(transport.NewLocalRunner())
+}
+
+func getWorktreeDirectoryForRunner(runner transport.Runner) (string, error) {
+	if runner.Kind() == transport.KindSSH {
+		return "~/.claude-squad/worktrees", nil
+	}
 	configDir, err := config.GetConfigDir()
 	if err != nil {
 		return "", err
@@ -19,6 +28,7 @@ func getWorktreeDirectory() (string, error) {
 
 // GitWorktree manages git worktree operations for a session
 type GitWorktree struct {
+	runner transport.Runner
 	// Path to the repository
 	repoPath string
 	// Path to the worktree
@@ -34,8 +44,9 @@ type GitWorktree struct {
 	isExistingBranch bool
 }
 
-func NewGitWorktreeFromStorage(repoPath string, worktreePath string, sessionName string, branchName string, baseCommitSHA string, isExistingBranch bool) *GitWorktree {
+func NewGitWorktreeFromStorage(runner transport.Runner, repoPath string, worktreePath string, sessionName string, branchName string, baseCommitSHA string, isExistingBranch bool) *GitWorktree {
 	return &GitWorktree{
+		runner:           runner,
 		repoPath:         repoPath,
 		worktreePath:     worktreePath,
 		sessionName:      sessionName,
@@ -46,24 +57,32 @@ func NewGitWorktreeFromStorage(repoPath string, worktreePath string, sessionName
 }
 
 // resolveWorktreePaths resolves the repo root and generates a unique worktree path for the given branch name.
-func resolveWorktreePaths(repoPath string, branchName string) (resolvedRepo string, worktreePath string, err error) {
-	absPath, err := filepath.Abs(repoPath)
-	if err != nil {
-		log.ErrorLog.Printf("git worktree path abs error, falling back to repoPath %s: %s", repoPath, err)
-		absPath = repoPath
+func resolveWorktreePaths(runner transport.Runner, repoPath string, branchName string) (resolvedRepo string, worktreePath string, err error) {
+	resolvedPath := repoPath
+	if runner.Kind() == transport.KindLocal {
+		absPath, err := filepath.Abs(repoPath)
+		if err != nil {
+			log.ErrorLog.Printf("git worktree path abs error, falling back to repoPath %s: %s", repoPath, err)
+		} else {
+			resolvedPath = absPath
+		}
 	}
 
-	resolvedRepo, err = findGitRepoRoot(absPath)
+	resolvedRepo, err = findGitRepoRootWithRunner(runner, resolvedPath)
 	if err != nil {
 		return "", "", err
 	}
 
-	worktreeDir, err := getWorktreeDirectory()
+	worktreeDir, err := getWorktreeDirectoryForRunner(runner)
 	if err != nil {
 		return "", "", err
 	}
 
-	worktreePath = filepath.Join(worktreeDir, sanitizeBranchName(branchName))
+	if runner.Kind() == transport.KindSSH {
+		worktreePath = path.Join(worktreeDir, sanitizeBranchName(branchName))
+	} else {
+		worktreePath = filepath.Join(worktreeDir, sanitizeBranchName(branchName))
+	}
 	worktreePath = worktreePath + "_" + fmt.Sprintf("%x", time.Now().UnixNano())
 
 	return resolvedRepo, worktreePath, nil
@@ -71,18 +90,23 @@ func resolveWorktreePaths(repoPath string, branchName string) (resolvedRepo stri
 
 // NewGitWorktree creates a new GitWorktree instance
 func NewGitWorktree(repoPath string, sessionName string) (tree *GitWorktree, branchname string, err error) {
+	return NewGitWorktreeWithRunner(transport.NewLocalRunner(), repoPath, sessionName)
+}
+
+func NewGitWorktreeWithRunner(runner transport.Runner, repoPath string, sessionName string) (tree *GitWorktree, branchname string, err error) {
 	cfg := config.LoadConfig()
 	branchName := fmt.Sprintf("%s%s", cfg.BranchPrefix, sessionName)
 	// Sanitize the final branch name to handle invalid characters from any source
 	// (e.g., backslashes from Windows domain usernames like DOMAIN\user)
 	branchName = sanitizeBranchName(branchName)
 
-	repoPath, worktreePath, err := resolveWorktreePaths(repoPath, branchName)
+	repoPath, worktreePath, err := resolveWorktreePaths(runner, repoPath, branchName)
 	if err != nil {
 		return nil, "", err
 	}
 
 	return &GitWorktree{
+		runner:       runner,
 		repoPath:     repoPath,
 		sessionName:  sessionName,
 		branchName:   branchName,
@@ -93,12 +117,17 @@ func NewGitWorktree(repoPath string, sessionName string) (tree *GitWorktree, bra
 // NewGitWorktreeFromBranch creates a new GitWorktree that uses an existing branch.
 // The branch will not be deleted on cleanup.
 func NewGitWorktreeFromBranch(repoPath string, branchName string, sessionName string) (*GitWorktree, error) {
-	repoPath, worktreePath, err := resolveWorktreePaths(repoPath, branchName)
+	return NewGitWorktreeFromBranchWithRunner(transport.NewLocalRunner(), repoPath, branchName, sessionName)
+}
+
+func NewGitWorktreeFromBranchWithRunner(runner transport.Runner, repoPath string, branchName string, sessionName string) (*GitWorktree, error) {
+	repoPath, worktreePath, err := resolveWorktreePaths(runner, repoPath, branchName)
 	if err != nil {
 		return nil, err
 	}
 
 	return &GitWorktree{
+		runner:           runner,
 		repoPath:         repoPath,
 		sessionName:      sessionName,
 		branchName:       branchName,
@@ -129,10 +158,43 @@ func (g *GitWorktree) GetRepoPath() string {
 
 // GetRepoName returns the name of the repository (last part of the repoPath).
 func (g *GitWorktree) GetRepoName() string {
+	if g.runner != nil && g.runner.Kind() == transport.KindSSH {
+		return path.Base(g.repoPath)
+	}
 	return filepath.Base(g.repoPath)
 }
 
 // GetBaseCommitSHA returns the base commit SHA for the worktree
 func (g *GitWorktree) GetBaseCommitSHA() string {
 	return g.baseCommitSHA
+}
+
+func (g *GitWorktree) RunnerKind() transport.Kind {
+	if g.runner == nil {
+		return transport.KindLocal
+	}
+	return g.runner.Kind()
+}
+
+func (g *GitWorktree) RunnerTarget() string {
+	if g.runner == nil {
+		return ""
+	}
+	return g.runner.Target()
+}
+
+func (g *GitWorktree) RunnerSSHUser() string {
+	runner, ok := g.runner.(*transport.SSHRunner)
+	if !ok {
+		return ""
+	}
+	return runner.Config().Username
+}
+
+func (g *GitWorktree) RunnerSSHHost() string {
+	runner, ok := g.runner.(*transport.SSHRunner)
+	if !ok {
+		return ""
+	}
+	return runner.Config().Host
 }

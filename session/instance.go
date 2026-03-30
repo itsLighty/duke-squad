@@ -5,6 +5,7 @@ import (
 	"claude-squad/log"
 	"claude-squad/session/git"
 	"claude-squad/session/tmux"
+	"claude-squad/transport"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -25,9 +26,13 @@ const (
 
 // Instance is a running instance of claude code.
 type Instance struct {
-	ID          string
-	ProjectID   string
-	ProjectKind ProjectKind
+	ID               string
+	ProjectID        string
+	ProjectKind      ProjectKind
+	ProjectTransport ProjectTransport
+	SSHTarget        string
+	SSHUser          string
+	SSHHost          string
 
 	Title     string
 	Path      string
@@ -52,19 +57,23 @@ type Instance struct {
 
 func (i *Instance) ToInstanceData() InstanceData {
 	data := InstanceData{
-		ID:          i.ID,
-		ProjectID:   i.ProjectID,
-		ProjectKind: i.ProjectKind,
-		Title:       i.Title,
-		Path:        i.Path,
-		Branch:      i.Branch,
-		Status:      i.Status,
-		Height:      i.Height,
-		Width:       i.Width,
-		CreatedAt:   i.CreatedAt,
-		UpdatedAt:   time.Now(),
-		Program:     i.Program,
-		AutoYes:     i.AutoYes,
+		ID:               i.ID,
+		ProjectID:        i.ProjectID,
+		ProjectKind:      i.ProjectKind,
+		ProjectTransport: i.ProjectTransport,
+		SSHTarget:        i.SSHTarget,
+		SSHUser:          i.SSHUser,
+		SSHHost:          i.SSHHost,
+		Title:            i.Title,
+		Path:             i.Path,
+		Branch:           i.Branch,
+		Status:           i.Status,
+		Height:           i.Height,
+		Width:            i.Width,
+		CreatedAt:        i.CreatedAt,
+		UpdatedAt:        time.Now(),
+		Program:          i.Program,
+		AutoYes:          i.AutoYes,
 	}
 
 	if i.workspace != nil {
@@ -106,6 +115,24 @@ func FromInstanceData(data InstanceData) (*Instance, error) {
 			}
 		}
 	}
+	if data.ProjectTransport == "" {
+		switch data.Workspace.Transport {
+		case ProjectTransportLocal, ProjectTransportSSH:
+			data.ProjectTransport = data.Workspace.Transport
+		default:
+			data.ProjectTransport = ProjectTransportLocal
+		}
+	}
+	if data.SSHTarget == "" {
+		data.SSHTarget = data.Workspace.SSHTarget
+	}
+	if data.SSHUser == "" {
+		data.SSHUser = data.Workspace.SSHUser
+	}
+	if data.SSHHost == "" {
+		data.SSHHost = data.Workspace.SSHHost
+	}
+	normalizeSSHInstanceData(&data)
 
 	workspace, branch, err := workspaceFromData(data.Workspace, data.Worktree)
 	if err != nil {
@@ -116,20 +143,24 @@ func FromInstanceData(data InstanceData) (*Instance, error) {
 	}
 
 	instance := &Instance{
-		ID:          data.ID,
-		ProjectID:   data.ProjectID,
-		ProjectKind: data.ProjectKind,
-		Title:       data.Title,
-		Path:        data.Path,
-		Branch:      data.Branch,
-		Status:      data.Status,
-		Height:      data.Height,
-		Width:       data.Width,
-		CreatedAt:   data.CreatedAt,
-		UpdatedAt:   data.UpdatedAt,
-		Program:     config.NormalizeProgramCommand(data.Program),
-		AutoYes:     data.AutoYes,
-		workspace:   workspace,
+		ID:               data.ID,
+		ProjectID:        data.ProjectID,
+		ProjectKind:      data.ProjectKind,
+		ProjectTransport: data.ProjectTransport,
+		SSHTarget:        data.SSHTarget,
+		SSHUser:          data.SSHUser,
+		SSHHost:          data.SSHHost,
+		Title:            data.Title,
+		Path:             data.Path,
+		Branch:           data.Branch,
+		Status:           data.Status,
+		Height:           data.Height,
+		Width:            data.Width,
+		CreatedAt:        data.CreatedAt,
+		UpdatedAt:        data.UpdatedAt,
+		Program:          config.NormalizeProgramCommand(data.Program),
+		AutoYes:          data.AutoYes,
+		workspace:        workspace,
 		diffStats: &git.DiffStats{
 			Added:   data.DiffStats.Added,
 			Removed: data.DiffStats.Removed,
@@ -137,7 +168,7 @@ func FromInstanceData(data InstanceData) (*Instance, error) {
 		},
 	}
 
-	instance.tmuxSession = tmux.NewTmuxSession(instance.tmuxName(), instance.Program)
+	instance.tmuxSession = tmux.NewTmuxSessionWithRunner(instance.tmuxName(), instance.Program, instance.Runner())
 
 	if instance.Paused() {
 		instance.started = true
@@ -160,27 +191,40 @@ func FromInstanceData(data InstanceData) (*Instance, error) {
 }
 
 type InstanceOptions struct {
-	ID          string
-	ProjectID   string
-	ProjectKind ProjectKind
-	Title       string
-	Path        string
-	Program     string
-	AutoYes     bool
-	Branch      string
+	ID               string
+	ProjectID        string
+	ProjectKind      ProjectKind
+	ProjectTransport ProjectTransport
+	SSHTarget        string
+	SSHUser          string
+	SSHHost          string
+	Title            string
+	Path             string
+	Program          string
+	AutoYes          bool
+	Branch           string
 }
 
 func NewInstance(opts InstanceOptions) (*Instance, error) {
 	t := time.Now()
 
-	absPath, err := filepath.Abs(opts.Path)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get absolute path: %w", err)
+	projectTransport := opts.ProjectTransport
+	if projectTransport == "" {
+		projectTransport = ProjectTransportLocal
+	}
+
+	resolvedPath := strings.TrimSpace(opts.Path)
+	if projectTransport == ProjectTransportLocal {
+		absPath, err := filepath.Abs(opts.Path)
+		if err != nil {
+			return nil, fmt.Errorf("failed to get absolute path: %w", err)
+		}
+		resolvedPath = absPath
 	}
 
 	projectKind := opts.ProjectKind
 	if projectKind == "" {
-		if git.IsGitRepo(absPath) {
+		if projectTransport == ProjectTransportLocal && git.IsGitRepo(resolvedPath) {
 			projectKind = ProjectKindGit
 		} else {
 			projectKind = ProjectKindFolder
@@ -193,19 +237,23 @@ func NewInstance(opts InstanceOptions) (*Instance, error) {
 	}
 
 	return &Instance{
-		ID:             id,
-		ProjectID:      opts.ProjectID,
-		ProjectKind:    projectKind,
-		Title:          opts.Title,
-		Status:         Ready,
-		Path:           absPath,
-		Program:        config.NormalizeProgramCommand(opts.Program),
-		Height:         0,
-		Width:          0,
-		CreatedAt:      t,
-		UpdatedAt:      t,
-		AutoYes:        opts.AutoYes,
-		selectedBranch: opts.Branch,
+		ID:               id,
+		ProjectID:        opts.ProjectID,
+		ProjectKind:      projectKind,
+		ProjectTransport: projectTransport,
+		SSHTarget:        opts.SSHTarget,
+		SSHUser:          opts.SSHUser,
+		SSHHost:          opts.SSHHost,
+		Title:            opts.Title,
+		Status:           Ready,
+		Path:             resolvedPath,
+		Program:          config.NormalizeProgramCommand(opts.Program),
+		Height:           0,
+		Width:            0,
+		CreatedAt:        t,
+		UpdatedAt:        t,
+		AutoYes:          opts.AutoYes,
+		selectedBranch:   opts.Branch,
 	}, nil
 }
 
@@ -233,11 +281,11 @@ func (i *Instance) Start(firstTimeSetup bool) error {
 	if i.tmuxSession != nil {
 		// Keep injected session for tests.
 	} else {
-		i.tmuxSession = tmux.NewTmuxSession(i.tmuxName(), i.Program)
+		i.tmuxSession = tmux.NewTmuxSessionWithRunner(i.tmuxName(), i.Program, i.Runner())
 	}
 
 	if firstTimeSetup {
-		workspace, branchName, err := createWorkspace(i.ProjectKind, i.Path, i.ID, i.Title, i.selectedBranch)
+		workspace, branchName, err := createWorkspace(i.ProjectTransport, i.SSHTarget, i.SSHUser, i.SSHHost, i.ProjectKind, i.Path, i.ID, i.Title, i.selectedBranch)
 		if err != nil {
 			return err
 		}
@@ -424,7 +472,20 @@ func (i *Instance) Pause() error {
 		log.ErrorLog.Print(err)
 	}
 
-	if _, err := os.Stat(i.workspace.Path()); err == nil {
+	if i.ProjectTransport == ProjectTransportLocal {
+		if _, err := os.Stat(i.workspace.Path()); err == nil {
+			if err := i.workspace.Remove(); err != nil {
+				errs = append(errs, fmt.Errorf("failed to remove workspace: %w", err))
+				log.ErrorLog.Print(err)
+				return i.combineErrors(errs)
+			}
+			if err := i.workspace.Prune(); err != nil {
+				errs = append(errs, fmt.Errorf("failed to prune workspace: %w", err))
+				log.ErrorLog.Print(err)
+				return i.combineErrors(errs)
+			}
+		}
+	} else {
 		if err := i.workspace.Remove(); err != nil {
 			errs = append(errs, fmt.Errorf("failed to remove workspace: %w", err))
 			log.ErrorLog.Print(err)
@@ -462,8 +523,14 @@ func (i *Instance) Resume() error {
 		if worktreePath == "" {
 			return fmt.Errorf("cannot restart session: worktree path unavailable")
 		}
-		if _, err := os.Stat(worktreePath); err != nil {
-			return fmt.Errorf("cannot restart session: worktree is missing")
+		if i.workspace != nil {
+			exists, err := i.workspace.Exists()
+			if err != nil {
+				return fmt.Errorf("cannot restart session: failed to verify workspace: %w", err)
+			}
+			if !exists {
+				return fmt.Errorf("cannot restart session: worktree is missing")
+			}
 		}
 		if err := i.tmuxSession.Start(worktreePath); err != nil {
 			log.ErrorLog.Print(err)
@@ -633,4 +700,35 @@ func (i *Instance) GetGitWorktree() (*git.GitWorktree, error) {
 		return nil, fmt.Errorf("instance is not backed by a git worktree")
 	}
 	return workspace.worktree, nil
+}
+
+func (i *Instance) Runner() transport.Runner {
+	switch i.ProjectTransport {
+	case "", ProjectTransportLocal:
+		return transport.NewLocalRunner()
+	case ProjectTransportSSH:
+		return transport.NewSSHRunnerWithConfig(transport.SSHConfig{
+			Username: i.SSHUser,
+			Host:     i.SSHHost,
+		})
+	default:
+		return transport.NewLocalRunner()
+	}
+}
+
+func normalizeSSHInstanceData(data *InstanceData) {
+	if data == nil || data.ProjectTransport != ProjectTransportSSH {
+		return
+	}
+	cfg := transport.ParseSSHConfig(data.SSHTarget)
+	if data.SSHUser == "" {
+		data.SSHUser = cfg.Username
+	}
+	if data.SSHHost == "" {
+		data.SSHHost = cfg.Host
+	}
+	data.SSHTarget = transport.SSHConfig{
+		Username: data.SSHUser,
+		Host:     data.SSHHost,
+	}.Target()
 }

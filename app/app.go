@@ -6,6 +6,7 @@ import (
 	"claude-squad/log"
 	"claude-squad/session"
 	"claude-squad/session/git"
+	"claude-squad/transport"
 	"claude-squad/ui"
 	"claude-squad/ui/overlay"
 	"context"
@@ -95,6 +96,7 @@ type home struct {
 	spinner spinner.Model
 	// textInputOverlay handles text input with state
 	textInputOverlay *overlay.TextInputOverlay
+	projectOverlay   *overlay.ProjectOverlay
 	// textOverlay displays text information
 	textOverlay *overlay.TextOverlay
 	// confirmationOverlay displays confirmation modals
@@ -173,6 +175,9 @@ func (m *home) updateHandleWindowSizeEvent(msg tea.WindowSizeMsg) {
 
 	if m.textInputOverlay != nil {
 		m.textInputOverlay.SetSize(int(float32(msg.Width)*0.6), int(float32(msg.Height)*0.4))
+	}
+	if m.projectOverlay != nil {
+		m.projectOverlay.SetSize(int(float32(msg.Width)*0.6), int(float32(msg.Height)*0.4))
 	}
 	if m.textOverlay != nil {
 		m.textOverlay.SetWidth(int(float32(msg.Width) * 0.6))
@@ -399,39 +404,91 @@ func (m *home) handleKeyPress(msg tea.KeyMsg) (mod tea.Model, cmd tea.Cmd) {
 
 		return m, nil
 	} else if m.state == stateAddProject {
+		if m.projectOverlay == nil && m.textInputOverlay != nil {
+			if msg.String() == "ctrl+c" {
+				m.textInputOverlay = nil
+				m.state = stateDefault
+				m.menu.SetState(ui.StateDefault)
+				return m, tea.WindowSize()
+			}
+
+			shouldClose, _ := m.textInputOverlay.HandleKeyPress(msg)
+			if !shouldClose {
+				return m, nil
+			}
+			if m.textInputOverlay.IsCanceled() {
+				m.textInputOverlay = nil
+				m.state = stateDefault
+				m.menu.SetState(ui.StateDefault)
+				return m, tea.WindowSize()
+			}
+			if !m.textInputOverlay.IsSubmitted() {
+				return m, nil
+			}
+
+			project, err := session.NewProject(m.textInputOverlay.GetPathValue())
+			if err != nil {
+				return m, m.handleError(err)
+			}
+			for _, existing := range m.list.GetProjects() {
+				if existing.LocationKey() == project.LocationKey() {
+					return m, m.handleError(fmt.Errorf("project already exists: %s", existing.RootPath))
+				}
+			}
+
+			m.list.AddProject(project)
+			m.textInputOverlay = nil
+			m.state = stateDefault
+			m.menu.SetState(ui.StateDefault)
+			if err := m.saveProjects(); err != nil {
+				return m, m.handleError(err)
+			}
+			return m, tea.Batch(tea.WindowSize(), m.instanceChanged())
+		}
+
 		if msg.String() == "ctrl+c" {
 			m.textInputOverlay = nil
+			m.projectOverlay = nil
 			m.state = stateDefault
 			m.menu.SetState(ui.StateDefault)
 			return m, tea.WindowSize()
 		}
 
-		shouldClose, _ := m.textInputOverlay.HandleKeyPress(msg)
+		shouldClose := m.projectOverlay.HandleKeyPress(msg)
 		if !shouldClose {
 			return m, nil
 		}
-		if m.textInputOverlay.IsCanceled() {
-			m.textInputOverlay = nil
+		if m.projectOverlay.IsCanceled() {
+			m.projectOverlay = nil
 			m.state = stateDefault
 			m.menu.SetState(ui.StateDefault)
 			return m, tea.WindowSize()
 		}
-		if !m.textInputOverlay.IsSubmitted() {
+		if !m.projectOverlay.IsSubmitted() {
 			return m, nil
 		}
 
-		project, err := session.NewProject(m.textInputOverlay.GetPathValue())
+		project, err := session.NewProjectFromOptions(m.projectOverlay.ProjectOptions())
 		if err != nil {
-			return m, m.handleError(err)
+			m.projectOverlay.SetError(err.Error())
+			return m, nil
 		}
 		for _, existing := range m.list.GetProjects() {
-			if existing.RootPath == project.RootPath {
-				return m, m.handleError(fmt.Errorf("project already exists: %s", existing.RootPath))
+			if existing.LocationKey() == project.LocationKey() {
+				m.projectOverlay.SetError(fmt.Sprintf("project already exists: %s", project.DisplayLocation()))
+				return m, nil
+			}
+		}
+		if project.Transport == session.ProjectTransportSSH {
+			if err := transport.StoreSSHPassword(project.SSHConfigWithPassword(m.projectOverlay.ProjectOptions().SSHPassword)); err != nil {
+				m.projectOverlay.SetError(err.Error())
+				return m, nil
 			}
 		}
 
 		m.list.AddProject(project)
 		m.textInputOverlay = nil
+		m.projectOverlay = nil
 		m.state = stateDefault
 		m.menu.SetState(ui.StateDefault)
 		if err := m.saveProjects(); err != nil {
@@ -489,6 +546,7 @@ func (m *home) handleKeyPress(msg tea.KeyMsg) (mod tea.Model, cmd tea.Cmd) {
 		m.state = stateAddProject
 		m.menu.SetState(ui.StatePrompt)
 		m.textInputOverlay = overlay.NewProjectPathOverlay("Project folder", m.launchDir)
+		m.projectOverlay = overlay.NewProjectOverlay(m.launchDir)
 		return m, tea.WindowSize()
 	case keys.KeyPrompt:
 		if m.list.NumInstances() >= GlobalInstanceLimit {
@@ -745,7 +803,12 @@ func (m *home) runBranchSearch(filter string, version uint64) tea.Cmd {
 		if project == nil || project.Kind != session.ProjectKindGit {
 			return nil
 		}
-		branches, err := git.SearchBranches(project.RootPath, filter)
+		runner, err := project.Runner()
+		if err != nil {
+			log.WarningLog.Printf("branch search failed: %v", err)
+			return nil
+		}
+		branches, err := git.SearchBranchesWithRunner(runner, project.RootPath, filter)
 		if err != nil {
 			log.WarningLog.Printf("branch search failed: %v", err)
 			return nil
@@ -883,9 +946,17 @@ func (m *home) View() string {
 		m.errBox.String(),
 	)
 
-	if m.state == stateCreate || m.state == stateAddProject {
+	if m.state == stateCreate {
 		if m.textInputOverlay == nil {
 			log.ErrorLog.Printf("text input overlay is nil")
+		}
+		return overlay.PlaceOverlay(0, 0, m.textInputOverlay.Render(), mainView, true, true)
+	} else if m.state == stateAddProject {
+		if m.projectOverlay != nil {
+			return overlay.PlaceOverlay(0, 0, m.projectOverlay.Render(), mainView, true, true)
+		}
+		if m.textInputOverlay == nil {
+			log.ErrorLog.Printf("project overlay is nil")
 		}
 		return overlay.PlaceOverlay(0, 0, m.textInputOverlay.Render(), mainView, true, true)
 	} else if m.state == stateHelp {

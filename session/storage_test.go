@@ -108,3 +108,72 @@ func TestLoadProjectsMigratesLegacyInstances(t *testing.T) {
 	require.NotEmpty(t, state.projects)
 	require.JSONEq(t, "[]", string(state.instances))
 }
+
+func TestSaveAndLoadProjectsPreservesSSHMetadata(t *testing.T) {
+	now := time.Now()
+	instance, err := FromInstanceData(InstanceData{
+		ID:               "sess_ssh",
+		ProjectID:        "proj_ssh",
+		ProjectKind:      ProjectKindGit,
+		ProjectTransport: ProjectTransportSSH,
+		SSHTarget:        "dukebot@dukebot.local",
+		SSHUser:          "dukebot",
+		SSHHost:          "dukebot.local",
+		Title:            "remote-work",
+		Path:             "/srv/repo",
+		Branch:           "codex/remote-work",
+		Status:           Paused,
+		Program:          "codex",
+		CreatedAt:        now,
+		UpdatedAt:        now,
+		Workspace: WorkspaceData{
+			Type:             ProjectKindGit,
+			Transport:        ProjectTransportSSH,
+			SSHTarget:        "dukebot@dukebot.local",
+			SSHUser:          "dukebot",
+			SSHHost:          "dukebot.local",
+			RootPath:         "/srv/repo",
+			WorkspacePath:    "~/.claude-squad/worktrees/codex_remote",
+			BranchName:       "codex/remote-work",
+			BaseCommitSHA:    "abc123",
+			IsExistingBranch: true,
+		},
+	})
+	require.NoError(t, err)
+
+	project := &Project{
+		ID:        "proj_ssh",
+		Name:      "remote-repo",
+		RootPath:  "/srv/repo",
+		Kind:      ProjectKindGit,
+		Transport: ProjectTransportSSH,
+		SSHTarget: "dukebot@dukebot.local",
+		SSHUser:   "dukebot",
+		SSHHost:   "dukebot.local",
+		CreatedAt: now,
+		UpdatedAt: now,
+		Sessions:  []*Instance{instance},
+	}
+
+	state := &fakeState{
+		projects:  json.RawMessage("[]"),
+		instances: json.RawMessage("[]"),
+	}
+	storage, err := NewStorage(state)
+	require.NoError(t, err)
+	require.NoError(t, storage.SaveProjects([]*Project{project}))
+
+	loaded, err := storage.LoadProjects()
+	require.NoError(t, err)
+	require.Len(t, loaded, 1)
+	require.Equal(t, ProjectTransportSSH, loaded[0].Transport)
+	require.Equal(t, "dukebot@dukebot.local", loaded[0].SSHTarget)
+	require.Equal(t, "dukebot", loaded[0].SSHUser)
+	require.Equal(t, "dukebot.local", loaded[0].SSHHost)
+	require.Len(t, loaded[0].Sessions, 1)
+	require.Equal(t, ProjectTransportSSH, loaded[0].Sessions[0].ProjectTransport)
+	require.Equal(t, "dukebot@dukebot.local", loaded[0].Sessions[0].SSHTarget)
+	require.Equal(t, "dukebot", loaded[0].Sessions[0].SSHUser)
+	require.Equal(t, "dukebot.local", loaded[0].Sessions[0].SSHHost)
+	require.Equal(t, "~/.claude-squad/worktrees/codex_remote", loaded[0].Sessions[0].GetWorktreePath())
+}

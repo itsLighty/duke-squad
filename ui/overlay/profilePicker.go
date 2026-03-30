@@ -12,6 +12,7 @@ import (
 // It displays a horizontal selector with left/right arrow navigation.
 type ProfilePicker struct {
 	profiles []config.Profile
+	label    string
 	cursor   int
 	focused  bool
 	width    int
@@ -20,8 +21,13 @@ type ProfilePicker struct {
 // NewProfilePicker creates a new profile picker with the given profiles.
 // The first profile is selected by default.
 func NewProfilePicker(profiles []config.Profile) *ProfilePicker {
+	return NewLabeledProfilePicker("Provider", profiles)
+}
+
+func NewLabeledProfilePicker(label string, profiles []config.Profile) *ProfilePicker {
 	return &ProfilePicker{
 		profiles: profiles,
+		label:    label,
 	}
 }
 
@@ -94,7 +100,11 @@ var (
 // Render renders the profile picker.
 func (pp *ProfilePicker) Render() string {
 	var s strings.Builder
-	s.WriteString(ppLabelStyle.Render("Provider"))
+	label := pp.label
+	if label == "" {
+		label = "Provider"
+	}
+	s.WriteString(ppLabelStyle.Render(label))
 
 	if pp.HasMultiple() && pp.focused {
 		s.WriteString(ppDimStyle.Render("  ←/→ to change"))

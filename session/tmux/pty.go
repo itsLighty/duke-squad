@@ -12,7 +12,6 @@ type PtyFactory interface {
 	Close()
 }
 
-// Pty starts a "real" pseudo-terminal (PTY) using the creack/pty package.
 type Pty struct{}
 
 func (pt Pty) Start(cmd *exec.Cmd) (*os.File, error) {

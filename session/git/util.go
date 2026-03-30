@@ -1,6 +1,7 @@
 package git
 
 import (
+	"claude-squad/transport"
 	"fmt"
 	"os/exec"
 	"regexp"
@@ -50,13 +51,25 @@ func checkGHCLI() error {
 
 // IsGitRepo checks if the given path is within a git repository
 func IsGitRepo(path string) bool {
-	cmd := exec.Command("git", "-C", path, "rev-parse", "--show-toplevel")
-	return cmd.Run() == nil
+	return IsGitRepoWithRunner(transport.NewLocalRunner(), path)
 }
 
 func findGitRepoRoot(path string) (string, error) {
-	cmd := exec.Command("git", "-C", path, "rev-parse", "--show-toplevel")
-	out, err := cmd.Output()
+	return findGitRepoRootWithRunner(transport.NewLocalRunner(), path)
+}
+
+func IsGitRepoWithRunner(runner transport.Runner, path string) bool {
+	return runner.Run(transport.CommandSpec{
+		Program: "git",
+		Args:    []string{"-C", path, "rev-parse", "--show-toplevel"},
+	}) == nil
+}
+
+func findGitRepoRootWithRunner(runner transport.Runner, path string) (string, error) {
+	out, err := runner.Output(transport.CommandSpec{
+		Program: "git",
+		Args:    []string{"-C", path, "rev-parse", "--show-toplevel"},
+	})
 	if err != nil {
 		return "", fmt.Errorf("failed to find Git repository root from path: %s", path)
 	}
@@ -65,4 +78,8 @@ func findGitRepoRoot(path string) (string, error) {
 
 func FindRepoRoot(path string) (string, error) {
 	return findGitRepoRoot(path)
+}
+
+func FindRepoRootWithRunner(runner transport.Runner, path string) (string, error) {
+	return findGitRepoRootWithRunner(runner, path)
 }

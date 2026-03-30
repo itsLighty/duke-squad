@@ -156,18 +156,21 @@ func (t *TerminalPane) ensureSessionLocked(instance *session.Instance) error {
 
 	shell := os.Getenv("SHELL")
 	if shell == "" {
-		shell = "/bin/sh"
+		shell = "sh"
+	}
+	if instance.ProjectTransport == session.ProjectTransportSSH {
+		shell = "sh"
 	}
 
 	termName := "term_" + instance.ID
-	ts := tmux.NewTmuxSession(termName, shell)
+	ts := tmux.NewTmuxSessionWithRunner(termName, shell, instance.Runner())
 
 	// Check if session already exists (e.g. from a previous run)
 	if ts.DoesSessionExist() {
 		if err := ts.Restore(); err != nil {
 			// Session exists but can't restore, kill it and start fresh
 			_ = ts.Close()
-			ts = tmux.NewTmuxSession(termName, shell)
+			ts = tmux.NewTmuxSessionWithRunner(termName, shell, instance.Runner())
 			if err := ts.Start(worktreePath); err != nil {
 				return fmt.Errorf("terminal pane: failed to start session: %w", err)
 			}

@@ -2,6 +2,7 @@ package git
 
 import (
 	"claude-squad/log"
+	"claude-squad/transport"
 	"fmt"
 	"os"
 	"os/exec"
@@ -12,12 +13,12 @@ import (
 // Setup creates a new worktree for the session
 func (g *GitWorktree) Setup() error {
 	// Ensure worktrees directory exists early (can be done in parallel with branch check)
-	worktreesDir, err := getWorktreeDirectory()
+	worktreesDir, err := getWorktreeDirectoryForRunner(g.runner)
 	if err != nil {
 		return fmt.Errorf("failed to get worktree directory: %w", err)
 	}
 
-	if err := os.MkdirAll(worktreesDir, 0755); err != nil {
+	if err := g.ensureDirectory(worktreesDir); err != nil {
 		return err
 	}
 
@@ -101,12 +102,12 @@ func (g *GitWorktree) Cleanup() error {
 	var errs []error
 
 	// Check if worktree path exists before attempting removal
-	if _, err := os.Stat(g.worktreePath); err == nil {
+	if exists, err := g.Exists(); err == nil && exists {
 		// Remove the worktree using git command
 		if _, err := g.runGitCommand(g.repoPath, "worktree", "remove", "-f", g.worktreePath); err != nil {
 			errs = append(errs, err)
 		}
-	} else if !os.IsNotExist(err) {
+	} else if err != nil {
 		// Only append error if it's not a "not exists" error
 		errs = append(errs, fmt.Errorf("failed to check worktree path: %w", err))
 	}
@@ -149,6 +150,44 @@ func (g *GitWorktree) Prune() error {
 		return fmt.Errorf("failed to prune worktrees: %w", err)
 	}
 	return nil
+}
+
+func (g *GitWorktree) Exists() (bool, error) {
+	if g.runner == nil || g.runner.Kind() == transport.KindLocal {
+		if _, err := os.Stat(g.worktreePath); err == nil {
+			return true, nil
+		} else if os.IsNotExist(err) {
+			return false, nil
+		} else {
+			return false, err
+		}
+	}
+
+	output, err := g.runner.CombinedOutput(transport.CommandSpec{
+		Program: "sh",
+		Args:    []string{"-lc", fmt.Sprintf("[ -d %s ] && printf yes", shellQuote(g.worktreePath))},
+	})
+	if err != nil {
+		return false, fmt.Errorf("failed to verify remote worktree %s: %w", g.worktreePath, err)
+	}
+	return strings.TrimSpace(string(output)) == "yes", nil
+}
+
+func (g *GitWorktree) ensureDirectory(dir string) error {
+	if g.runner == nil || g.runner.Kind() == transport.KindLocal {
+		return os.MkdirAll(dir, 0755)
+	}
+	return g.runner.Run(transport.CommandSpec{
+		Program: "mkdir",
+		Args:    []string{"-p", dir},
+	})
+}
+
+func shellQuote(value string) string {
+	if value == "" {
+		return "''"
+	}
+	return "'" + strings.ReplaceAll(value, "'", `'"'"'`) + "'"
 }
 
 func runGitCommandAt(path string, args ...string) (string, error) {

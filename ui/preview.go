@@ -56,14 +56,16 @@ func (p *PreviewPane) UpdateContent(project *session.Project, instance *session.
 		p.setFallbackState("No projects yet. Add one with 'a' to start tracking work.")
 		return nil
 	case project != nil && instance == nil:
-		p.setFallbackState(lipgloss.JoinVertical(
-			lipgloss.Center,
+		lines := []string{
 			project.Name,
 			"",
 			projectMetaText(project),
-			"",
-			"Press 'n' to start a session here.",
-		))
+		}
+		if location := projectLocationText(project); location != "" {
+			lines = append(lines, "", location)
+		}
+		lines = append(lines, "", "Press 'n' to start a session here.")
+		p.setFallbackState(lipgloss.JoinVertical(lipgloss.Center, lines...))
 		return nil
 	case instance.Status == session.Loading:
 		p.setFallbackState("Setting up workspace...")

@@ -10,20 +10,24 @@ import (
 
 // InstanceData represents the serializable data of an Instance.
 type InstanceData struct {
-	ID          string        `json:"id"`
-	ProjectID   string        `json:"project_id"`
-	ProjectKind ProjectKind   `json:"project_kind"`
-	Title       string        `json:"title"`
-	Path        string        `json:"path"`
-	Branch      string        `json:"branch"`
-	Status      Status        `json:"status"`
-	Height      int           `json:"height"`
-	Width       int           `json:"width"`
-	CreatedAt   time.Time     `json:"created_at"`
-	UpdatedAt   time.Time     `json:"updated_at"`
-	AutoYes     bool          `json:"auto_yes"`
-	Program     string        `json:"program"`
-	Workspace   WorkspaceData `json:"workspace"`
+	ID               string           `json:"id"`
+	ProjectID        string           `json:"project_id"`
+	ProjectKind      ProjectKind      `json:"project_kind"`
+	ProjectTransport ProjectTransport `json:"project_transport,omitempty"`
+	SSHTarget        string           `json:"ssh_target,omitempty"`
+	SSHUser          string           `json:"ssh_user,omitempty"`
+	SSHHost          string           `json:"ssh_host,omitempty"`
+	Title            string           `json:"title"`
+	Path             string           `json:"path"`
+	Branch           string           `json:"branch"`
+	Status           Status           `json:"status"`
+	Height           int              `json:"height"`
+	Width            int              `json:"width"`
+	CreatedAt        time.Time        `json:"created_at"`
+	UpdatedAt        time.Time        `json:"updated_at"`
+	AutoYes          bool             `json:"auto_yes"`
+	Program          string           `json:"program"`
+	Workspace        WorkspaceData    `json:"workspace"`
 
 	// Worktree is retained for one-shot migration from the legacy storage shape.
 	Worktree  GitWorktreeData `json:"worktree"`
@@ -135,6 +139,7 @@ func (s *Storage) loadLegacyProjects() ([]*Project, bool, error) {
 				Name:      name,
 				RootPath:  projectRoot,
 				Kind:      ProjectKindGit,
+				Transport: ProjectTransportLocal,
 				CreatedAt: time.Now(),
 				UpdatedAt: time.Now(),
 				Sessions:  []*Instance{},
@@ -150,9 +155,16 @@ func (s *Storage) loadLegacyProjects() ([]*Project, bool, error) {
 		if data.ProjectKind == "" {
 			data.ProjectKind = ProjectKindGit
 		}
+		if data.ProjectTransport == "" {
+			data.ProjectTransport = ProjectTransportLocal
+		}
 		if data.Workspace.Type == "" {
 			data.Workspace = WorkspaceData{
 				Type:             ProjectKindGit,
+				Transport:        data.ProjectTransport,
+				SSHTarget:        data.SSHTarget,
+				SSHUser:          data.SSHUser,
+				SSHHost:          data.SSHHost,
 				RootPath:         data.Worktree.RepoPath,
 				WorkspacePath:    data.Worktree.WorktreePath,
 				BranchName:       data.Worktree.BranchName,
@@ -221,6 +233,10 @@ func (s *Storage) SaveInstances(instances []*Instance) error {
 				Name:      filepath.Base(instance.Path),
 				RootPath:  instance.Path,
 				Kind:      instance.ProjectKind,
+				Transport: instance.ProjectTransport,
+				SSHTarget: instance.SSHTarget,
+				SSHUser:   instance.SSHUser,
+				SSHHost:   instance.SSHHost,
 				CreatedAt: time.Now(),
 				UpdatedAt: time.Now(),
 				Sessions:  []*Instance{},

@@ -202,12 +202,16 @@ func newCreateSessionInstance(title string, project *session.Project, program, p
 	}
 
 	instance, err := session.NewInstance(session.InstanceOptions{
-		Title:       title,
-		Path:        project.RootPath,
-		Program:     program,
-		AutoYes:     autoYes,
-		ProjectID:   project.ID,
-		ProjectKind: project.Kind,
+		Title:            title,
+		Path:             project.RootPath,
+		Program:          program,
+		AutoYes:          autoYes,
+		ProjectID:        project.ID,
+		ProjectKind:      project.Kind,
+		ProjectTransport: project.Transport,
+		SSHTarget:        project.SSHTarget,
+		SSHUser:          project.SSHUser,
+		SSHHost:          project.SSHHost,
 	})
 	if err != nil {
 		return nil, err
@@ -246,8 +250,12 @@ func (m *home) beginCreateSession(includePrompt bool) tea.Cmd {
 
 	cmds := []tea.Cmd{tea.WindowSize()}
 	if includePrompt && project.Kind == session.ProjectKindGit {
+		runner, err := project.Runner()
+		if err != nil {
+			return m.handleError(err)
+		}
 		fetchCmd := func() tea.Msg {
-			git.FetchBranches(project.RootPath)
+			git.FetchBranchesWithRunner(runner, project.RootPath)
 			return nil
 		}
 		cmds = append(cmds, fetchCmd, m.runBranchSearch("", m.textInputOverlay.BranchFilterVersion()))
