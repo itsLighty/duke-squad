@@ -2,6 +2,7 @@ package ui
 
 import (
 	"claude-squad/session"
+	"strings"
 	"testing"
 
 	"github.com/charmbracelet/bubbles/spinner"
@@ -28,4 +29,25 @@ func TestProjectRowRendersMetaInsteadOfRootPath(t *testing.T) {
 	require.Contains(t, rendered, "Git project")
 	require.Contains(t, rendered, "1 session")
 	require.NotContains(t, rendered, "/Users/denizsonmez/Desktop/very-long-folder/claude-squad")
+}
+
+func TestProjectRowRenderIsCompact(t *testing.T) {
+	spin := spinner.New(spinner.WithSpinner(spinner.MiniDot))
+	renderer := &InstanceRenderer{spinner: &spin}
+	renderer.setWidth(48)
+
+	rendered := stripANSI(renderer.renderProject(&session.Project{
+		ID:       "proj-1",
+		Name:     "claude-squad",
+		Kind:     session.ProjectKindGit,
+		Sessions: []*session.Instance{{ID: "sess-1"}},
+	}, true))
+
+	lines := strings.Split(strings.TrimRight(rendered, "\n"), "\n")
+
+	require.Len(t, lines, 2)
+	require.NotEmpty(t, strings.TrimSpace(lines[0]))
+	require.Contains(t, lines[0], "claude-squad")
+	require.False(t, strings.HasPrefix(lines[0], " "))
+	require.Contains(t, lines[1], "Git project")
 }

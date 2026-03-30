@@ -3,31 +3,21 @@ package ui
 import (
 	"claude-squad/log"
 	"claude-squad/session"
+	"strings"
+
 	"github.com/charmbracelet/lipgloss"
 )
 
-func tabBorderWithBottom(left, middle, right string) lipgloss.Border {
-	border := lipgloss.RoundedBorder()
-	border.BottomLeft = left
-	border.Bottom = middle
-	border.BottomRight = right
-	return border
-}
-
 var (
-	inactiveTabBorder = tabBorderWithBottom("┴", "─", "┴")
-	activeTabBorder   = tabBorderWithBottom("┘", " ", "└")
-	highlightColor    = lipgloss.AdaptiveColor{Light: "#874BFD", Dark: "#7D56F4"}
-	inactiveTabStyle  = lipgloss.NewStyle().
-				Border(inactiveTabBorder, true).
-				BorderForeground(highlightColor).
-				AlignHorizontal(lipgloss.Center)
-	activeTabStyle = inactiveTabStyle.
-			Border(activeTabBorder, true).
-			AlignHorizontal(lipgloss.Center)
-	windowStyle = lipgloss.NewStyle().
-			BorderForeground(highlightColor).
-			Border(lipgloss.NormalBorder(), false, true, true, true)
+	highlightColor      = lipgloss.AdaptiveColor{Light: "#2F6A62", Dark: "#8FD0C1"}
+	tabSeparatorStyle   = lipgloss.NewStyle().Foreground(lipgloss.AdaptiveColor{Light: "#B9C2BC", Dark: "#4E5C57"})
+	inactiveTabStyle    = lipgloss.NewStyle().Foreground(lipgloss.AdaptiveColor{Light: "#7D847F", Dark: "#8A928D"}).Padding(0, 1)
+	activeTabStyle      = lipgloss.NewStyle().Foreground(highlightColor).Bold(true).Padding(0, 1)
+	tabRowStyle         = lipgloss.NewStyle()
+	windowStyle         = lipgloss.NewStyle()
+	projectOverviewStyle = lipgloss.NewStyle().
+				Foreground(lipgloss.AdaptiveColor{Light: "#1f2622", Dark: "#d7ddd9"}).
+				Align(lipgloss.Center)
 )
 
 const (
@@ -76,7 +66,7 @@ func (w *TabbedWindow) SetSelection(project *session.Project, instance *session.
 }
 
 func (w *TabbedWindow) paneSize() (width int, height int) {
-	tabHeight := activeTabStyle.GetVerticalFrameSize() + 1
+	tabHeight := tabRowStyle.GetVerticalFrameSize() + 1
 	return clampDimension(w.width - windowStyle.GetHorizontalFrameSize()),
 		clampDimension(w.height - tabHeight - windowStyle.GetVerticalFrameSize())
 }
@@ -240,42 +230,12 @@ func (w *TabbedWindow) String() string {
 		return ""
 	}
 
-	var renderedTabs []string
-
-	contentWidth, contentHeight := w.paneSize()
-	totalTabWidth := w.width
-	tabWidth := totalTabWidth / len(w.tabs)
-	lastTabWidth := totalTabWidth - tabWidth*(len(w.tabs)-1)
-
-	for i, t := range w.tabs {
-		width := tabWidth
-		if i == len(w.tabs)-1 {
-			width = lastTabWidth
-		}
-
-		var style lipgloss.Style
-		isFirst, isLast, isActive := i == 0, i == len(w.tabs)-1, i == w.activeTab
-		if isActive {
-			style = activeTabStyle
-		} else {
-			style = inactiveTabStyle
-		}
-		border, _, _, _, _ := style.GetBorder()
-		if isFirst && isActive {
-			border.BottomLeft = "│"
-		} else if isFirst {
-			border.BottomLeft = "├"
-		} else if isLast && isActive {
-			border.BottomRight = "│"
-		} else if isLast {
-			border.BottomRight = "┤"
-		}
-		style = style.Border(border)
-		style = style.Width(max(0, width-style.GetHorizontalFrameSize()))
-		renderedTabs = append(renderedTabs, style.Render(t))
+	if w.project != nil && w.instance == nil {
+		return renderCenteredTextBlock(projectOverviewStyle, w.width, w.height, projectOverviewText(w.project))
 	}
 
-	row := lipgloss.JoinHorizontal(lipgloss.Top, renderedTabs...)
+	contentWidth, contentHeight := w.paneSize()
+	row := w.renderTabRow()
 	var content string
 	switch w.activeTab {
 	case PreviewTab:
@@ -291,4 +251,40 @@ func (w *TabbedWindow) String() string {
 			lipgloss.Left, lipgloss.Top, content))
 
 	return lipgloss.JoinVertical(lipgloss.Left, row, window)
+}
+
+func (w *TabbedWindow) renderTabRow() string {
+	renderedTabs := make([]string, 0, len(w.tabs)*2-1)
+
+	for i, label := range w.tabs {
+		style := inactiveTabStyle
+		if i == w.activeTab {
+			style = activeTabStyle
+		}
+		renderedTabs = append(renderedTabs, style.Render(label))
+		if i != len(w.tabs)-1 {
+			renderedTabs = append(renderedTabs, tabSeparatorStyle.Render("·"))
+		}
+	}
+
+	return tabRowStyle.Width(w.width).Render(lipgloss.JoinHorizontal(lipgloss.Left, renderedTabs...))
+}
+
+func renderCenteredTextBlock(style lipgloss.Style, width, height int, text string) string {
+	availableHeight := clampDimension(height)
+	lines := strings.Split(text, "\n")
+	padding := max(0, availableHeight-len(lines))
+	topPadding := padding / 2
+	bottomPadding := padding - topPadding
+
+	var content []string
+	if topPadding > 0 {
+		content = append(content, strings.Repeat("\n", topPadding))
+	}
+	content = append(content, text)
+	if bottomPadding > 0 {
+		content = append(content, strings.Repeat("\n", bottomPadding))
+	}
+
+	return style.Width(clampDimension(width)).Render(strings.Join(content, ""))
 }

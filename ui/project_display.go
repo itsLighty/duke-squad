@@ -3,6 +3,8 @@ package ui
 import (
 	"claude-squad/session"
 	"fmt"
+
+	"github.com/charmbracelet/lipgloss"
 )
 
 func projectKindText(kind session.ProjectKind) string {
@@ -32,6 +34,24 @@ func projectLocationText(project *session.Project) string {
 		return project.DisplayLocation()
 	}
 	return ""
+}
+
+func projectOverviewText(project *session.Project) string {
+	if project == nil {
+		return ""
+	}
+
+	lines := []string{
+		project.Name,
+		"",
+		projectMetaText(project),
+	}
+	if location := projectLocationText(project); location != "" {
+		lines = append(lines, "", location)
+	}
+	lines = append(lines, "", "Press 'n' to start a session here.")
+
+	return lipgloss.JoinVertical(lipgloss.Center, lines...)
 }
 
 func legacyProjectKindText(kind session.ProjectKind) string {

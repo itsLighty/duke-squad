@@ -27,30 +27,24 @@ var pausedStyle = lipgloss.NewStyle().
 	Foreground(lipgloss.AdaptiveColor{Light: "#888888", Dark: "#888888"})
 
 var titleStyle = lipgloss.NewStyle().
-	Padding(1, 1, 0, 1).
 	Foreground(lipgloss.AdaptiveColor{Light: "#1a1a1a", Dark: "#dddddd"})
 
 var listDescStyle = lipgloss.NewStyle().
-	Padding(0, 1, 1, 1).
-	Foreground(lipgloss.AdaptiveColor{Light: "#A49FA5", Dark: "#777777"})
+	Foreground(lipgloss.AdaptiveColor{Light: "#8A918C", Dark: "#777F79"})
 
 var selectedTitleStyle = lipgloss.NewStyle().
-	Padding(1, 1, 0, 1).
-	Background(lipgloss.Color("#dde4f0")).
-	Foreground(lipgloss.AdaptiveColor{Light: "#1a1a1a", Dark: "#1a1a1a"})
+	Bold(true).
+	Foreground(highlightColor)
 
 var selectedDescStyle = lipgloss.NewStyle().
-	Padding(0, 1, 1, 1).
-	Background(lipgloss.Color("#dde4f0")).
-	Foreground(lipgloss.AdaptiveColor{Light: "#1a1a1a", Dark: "#1a1a1a"})
+	Foreground(lipgloss.AdaptiveColor{Light: "#5E786E", Dark: "#7CB5A5"})
 
 var mainTitle = lipgloss.NewStyle().
-	Background(lipgloss.Color("62")).
-	Foreground(lipgloss.Color("230"))
+	Bold(true).
+	Foreground(lipgloss.AdaptiveColor{Light: "#50665C", Dark: "#89A79A"})
 
 var autoYesStyle = lipgloss.NewStyle().
-	Background(lipgloss.Color("#dde4f0")).
-	Foreground(lipgloss.Color("#1a1a1a"))
+	Foreground(lipgloss.AdaptiveColor{Light: "#8A918C", Dark: "#777F79"})
 
 type rowKind int
 
@@ -142,9 +136,11 @@ func (r *InstanceRenderer) setWidth(width int) {
 func (r *InstanceRenderer) renderProject(project *session.Project, selected bool) string {
 	titleS := titleStyle
 	descS := listDescStyle
+	prefix := "  "
 	if selected {
 		titleS = selectedTitleStyle
 		descS = selectedDescStyle
+		prefix = "› "
 	}
 
 	caret := "▾"
@@ -152,12 +148,12 @@ func (r *InstanceRenderer) renderProject(project *session.Project, selected bool
 		caret = "▸"
 	}
 
-	titleText := fmt.Sprintf("%s %s", caret, project.Name)
+	titleText := fmt.Sprintf("%s%s %s", prefix, caret, project.Name)
 	if runewidth.StringWidth(titleText) > r.width-2 {
 		titleText = runewidth.Truncate(titleText, r.width-5, "...")
 	}
 
-	metaText := projectMetaText(project)
+	metaText := prefix + projectMetaText(project)
 	if runewidth.StringWidth(metaText) > r.width-2 {
 		metaText = runewidth.Truncate(metaText, r.width-5, "...")
 	}
@@ -172,9 +168,11 @@ func (r *InstanceRenderer) renderProject(project *session.Project, selected bool
 func (r *InstanceRenderer) renderSession(i *session.Instance, selected bool) string {
 	titleS := titleStyle
 	descS := listDescStyle
+	prefix := "  "
 	if selected {
 		titleS = selectedTitleStyle
 		descS = selectedDescStyle
+		prefix = "› "
 	}
 
 	var join string
@@ -187,7 +185,7 @@ func (r *InstanceRenderer) renderSession(i *session.Instance, selected bool) str
 		join = pausedStyle.Render(pausedIcon)
 	}
 
-	titleText := "  " + i.Title
+	titleText := prefix + i.Title
 	widthAvail := r.width - 4
 	if widthAvail > 0 && runewidth.StringWidth(titleText) > widthAvail {
 		titleText = runewidth.Truncate(titleText, widthAvail-3, "...")
@@ -220,7 +218,7 @@ func (r *InstanceRenderer) renderSession(i *session.Instance, selected bool) str
 		)
 	}
 
-	line := "  " + location
+	line := prefix + location
 	if diff != "" {
 		line += "  " + diff
 	}
@@ -240,7 +238,7 @@ func (l *List) String() string {
 	const autoYesText = " auto-yes "
 
 	var b strings.Builder
-	b.WriteString("\n\n")
+	b.WriteString("\n")
 
 	titleWidth := l.width
 	if !l.autoyes {
@@ -251,7 +249,7 @@ func (l *List) String() string {
 		b.WriteString(lipgloss.JoinHorizontal(lipgloss.Top, title, autoYes))
 	}
 
-	b.WriteString("\n\n")
+	b.WriteString("\n")
 
 	for i, row := range l.rows {
 		switch row.kind {
@@ -261,7 +259,7 @@ func (l *List) String() string {
 			b.WriteString(l.renderer.renderSession(row.instance, i == l.selectedIdx))
 		}
 		if i != len(l.rows)-1 {
-			b.WriteString("\n\n")
+			b.WriteString("\n")
 		}
 	}
 

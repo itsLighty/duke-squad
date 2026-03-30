@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"claude-squad/session"
 	"strings"
 	"testing"
 
@@ -54,4 +55,45 @@ func TestTabbedWindowResetTransientStateClearsScrollModes(t *testing.T) {
 	require.NotContains(t, window.terminal.viewport.View(), "terminal history")
 	require.True(t, strings.TrimSpace(window.terminal.viewport.View()) == "")
 	require.Equal(t, 0, window.diff.viewport.YOffset)
+}
+
+func TestTabbedWindowProjectSelectionRendersOverviewWithoutTabs(t *testing.T) {
+	window := NewTabbedWindow(NewPreviewPane(), NewDiffPane(), NewTerminalPane())
+	window.SetSize(80, 24)
+	window.activeTab = TerminalTab
+	project := &session.Project{
+		ID:       "proj-1",
+		Name:     "claude-squad",
+		Kind:     session.ProjectKindGit,
+		Sessions: []*session.Instance{{ID: "sess-1"}},
+	}
+	window.SetSelection(project, nil)
+
+	rendered := stripANSI(window.String())
+
+	require.Contains(t, rendered, "claude-squad")
+	require.Contains(t, rendered, "Git project • 1 session")
+	require.Contains(t, rendered, "Press 'n' to start a session here.")
+	require.NotContains(t, rendered, "Preview")
+	require.NotContains(t, rendered, "Diff")
+	require.NotContains(t, rendered, "Terminal")
+}
+
+func TestTabbedWindowSessionTabsRenderInlineLabels(t *testing.T) {
+	window := NewTabbedWindow(NewPreviewPane(), NewDiffPane(), NewTerminalPane())
+	window.SetSize(80, 24)
+	window.SetSelection(&session.Project{ID: "proj-1", Name: "claude-squad"}, &session.Instance{
+		ID:    "sess-1",
+		Title: "ship polish",
+	})
+
+	rendered := stripANSI(window.String())
+
+	require.Contains(t, rendered, "Preview")
+	require.Contains(t, rendered, "Diff")
+	require.Contains(t, rendered, "Terminal")
+	require.NotContains(t, rendered, "╭")
+	require.NotContains(t, rendered, "╮")
+	require.NotContains(t, rendered, "╰")
+	require.NotContains(t, rendered, "╯")
 }

@@ -10,27 +10,27 @@ import (
 )
 
 var keyStyle = lipgloss.NewStyle().Foreground(lipgloss.AdaptiveColor{
-	Light: "#655F5F",
-	Dark:  "#7F7A7A",
+	Light: "#667069",
+	Dark:  "#7F8A83",
 })
 
 var descStyle = lipgloss.NewStyle().Foreground(lipgloss.AdaptiveColor{
-	Light: "#7A7474",
-	Dark:  "#9C9494",
+	Light: "#8A918C",
+	Dark:  "#7A827D",
 })
 
 var sepStyle = lipgloss.NewStyle().Foreground(lipgloss.AdaptiveColor{
-	Light: "#DDDADA",
-	Dark:  "#3C3C3C",
+	Light: "#C8D0CB",
+	Dark:  "#44504A",
 })
 
-var actionGroupStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("99"))
+var actionGroupStyle = lipgloss.NewStyle().Foreground(highlightColor)
 
-var separator = " • "
-var verticalSeparator = " │ "
+var separator = " · "
+var verticalSeparator = " / "
 
 var menuStyle = lipgloss.NewStyle().
-	Foreground(lipgloss.Color("205"))
+	Foreground(lipgloss.AdaptiveColor{Light: "#7A827D", Dark: "#848C87"})
 
 // MenuState represents different states the menu can be in
 type MenuState int
