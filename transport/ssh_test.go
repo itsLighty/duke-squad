@@ -47,6 +47,6 @@ func TestAuthEnvIncludesAskPassForHostKeyPromptsWithoutPassword(t *testing.T) {
 
 	require.Contains(t, env, "SSH_ASKPASS="+manager.askpass)
 	require.Contains(t, env, "SSH_ASKPASS_REQUIRE=force")
-	require.Contains(t, env, "CLAUDE_SQUAD_SSH_KEYCHAIN_SERVICE=claude-squad:ssh:dukebot.local")
-	require.Contains(t, env, "CLAUDE_SQUAD_SSH_KEYCHAIN_ACCOUNT=dukebot")
+	require.Contains(t, env, "DUKE_SQUAD_SSH_KEYCHAIN_SERVICE=duke-squad:ssh:dukebot.local")
+	require.Contains(t, env, "DUKE_SQUAD_SSH_KEYCHAIN_ACCOUNT=dukebot")
 }

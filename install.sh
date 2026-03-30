@@ -2,6 +2,12 @@
 
 set -e
 
+REPOSITORY="itsLighty/duke-squad"
+UPSTREAM_REPOSITORY="smtg-ai/claude-squad"
+INSTALL_NAME="duke-squad"
+SHORTCUT_NAME="ds"
+LEGACY_COMMAND="cs"
+
 setup_shell_and_path() {
     BIN_DIR=${BIN_DIR:-$HOME/.local/bin}
 
@@ -59,7 +65,7 @@ detect_platform_and_arch() {
 
 get_latest_version() {
     # Get latest version from GitHub API, including prereleases
-    API_RESPONSE=$(curl -sS "https://api.github.com/repos/smtg-ai/claude-squad/releases")
+    API_RESPONSE=$(curl -sS "https://api.github.com/repos/${REPOSITORY}/releases")
     if [ $? -ne 0 ]; then
         echo "Failed to connect to GitHub API"
         exit 1
@@ -141,9 +147,10 @@ extract_and_install() {
         echo "Removing previous installation from $bin_dir/$INSTALL_NAME${extension}"
         rm -f "$bin_dir/$INSTALL_NAME${extension}"
     fi
+    rm -f "$bin_dir/$SHORTCUT_NAME${extension}"
 
     # Install binary with desired name
-    mv "${tmp_dir}/claude-squad${extension}" "$bin_dir/$INSTALL_NAME${extension}"
+    mv "${tmp_dir}/duke-squad${extension}" "$bin_dir/$INSTALL_NAME${extension}"
     rm -rf "$tmp_dir"
 
     if [ ! -f "$bin_dir/$INSTALL_NAME${extension}" ]; then
@@ -152,12 +159,13 @@ extract_and_install() {
     fi
 
     chmod +x "$bin_dir/$INSTALL_NAME${extension}"
+    create_shortcut "$bin_dir" "$extension"
     
     echo ""
     if [ "$UPGRADE_MODE" = true ]; then
-        echo "Successfully upgraded '$INSTALL_NAME' to:"
+        echo "Successfully upgraded '$INSTALL_NAME' and refreshed '$SHORTCUT_NAME':"
     else
-        echo "Installed as '$INSTALL_NAME':"
+        echo "Installed '$INSTALL_NAME' with '$SHORTCUT_NAME' shortcut:"
     fi
     echo "$("$bin_dir/$INSTALL_NAME${extension}" version)"
 }
@@ -170,6 +178,38 @@ check_command_exists() {
         UPGRADE_MODE=true
     else
         UPGRADE_MODE=false
+    fi
+}
+
+create_shortcut() {
+    local bin_dir=$1
+    local extension=$2
+    local source_path="$bin_dir/$INSTALL_NAME${extension}"
+    local shortcut_path="$bin_dir/$SHORTCUT_NAME${extension}"
+
+    if [[ "$PLATFORM" == "windows" ]]; then
+        cp "$source_path" "$shortcut_path"
+        return
+    fi
+
+    (
+        cd "$bin_dir"
+        ln -sfn "$INSTALL_NAME${extension}" "$SHORTCUT_NAME${extension}"
+    )
+}
+
+warn_about_upstream_cs() {
+    if ! command -v "$LEGACY_COMMAND" &> /dev/null; then
+        return
+    fi
+
+    LEGACY_PATH=$(command -v "$LEGACY_COMMAND")
+    LEGACY_VERSION=$("$LEGACY_PATH" version 2>/dev/null || true)
+
+    if echo "$LEGACY_VERSION" | grep -q "$UPSTREAM_REPOSITORY"; then
+        echo "Warning: upstream '$LEGACY_COMMAND' detected at $LEGACY_PATH"
+        echo "This installer will not replace it. Use '$INSTALL_NAME' or '$SHORTCUT_NAME' for the fork."
+        echo ""
     fi
 }
 
@@ -266,26 +306,17 @@ check_and_install_dependencies() {
 }
 
 main() {
-    # Parse command line arguments
-    INSTALL_NAME="cs"
     UPGRADE_MODE=false
-    
-    while [[ $# -gt 0 ]]; do
-        case $1 in
-            --name)
-                INSTALL_NAME="$2"
-                shift 2
-                ;;
-            *)
-                echo "Unknown option: $1"
-                echo "Usage: install.sh [--name <n>]"
-                exit 1
-                ;;
-        esac
-    done
+
+    if [[ $# -gt 0 ]]; then
+        echo "Unknown option: $1"
+        echo "Usage: install.sh"
+        exit 1
+    fi
 
     check_command_exists
     detect_platform_and_arch
+    warn_about_upstream_cs
     
     check_and_install_dependencies
     
@@ -296,8 +327,8 @@ main() {
         VERSION=$(get_latest_version)
     fi
 
-    RELEASE_URL="https://github.com/smtg-ai/claude-squad/releases/download/v${VERSION}"
-    ARCHIVE_NAME="claude-squad_${VERSION}_${PLATFORM}_${ARCHITECTURE}${ARCHIVE_EXT}"
+    RELEASE_URL="https://github.com/${REPOSITORY}/releases/download/v${VERSION}"
+    ARCHIVE_NAME="duke-squad_${VERSION}_${PLATFORM}_${ARCHITECTURE}${ARCHIVE_EXT}"
     BINARY_URL="${RELEASE_URL}/${ARCHIVE_NAME}"
     TMP_DIR=$(mktemp -d)
     

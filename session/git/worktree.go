@@ -16,7 +16,7 @@ func getWorktreeDirectory() (string, error) {
 
 func getWorktreeDirectoryForRunner(runner transport.Runner) (string, error) {
 	if runner.Kind() == transport.KindSSH {
-		return "~/.claude-squad/worktrees", nil
+		return "~/" + config.ConfigDirName[1:] + "/worktrees", nil
 	}
 	configDir, err := config.GetConfigDir()
 	if err != nil {

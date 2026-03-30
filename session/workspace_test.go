@@ -4,7 +4,9 @@ import (
 	"claude-squad/transport"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -63,6 +65,8 @@ func TestFolderWorkspaceSetupCreatesManagedGitCopy(t *testing.T) {
 	require.FileExists(t, filepath.Join(folderWorkspace.workspacePath, ".git", "HEAD"))
 	require.FileExists(t, filepath.Join(folderWorkspace.workspacePath, "notes.txt"))
 	require.NotEmpty(t, folderWorkspace.baseCommitSHA)
+	require.Equal(t, "Duke Squad", gitLocalConfig(t, folderWorkspace.workspacePath, "user.name"))
+	require.Equal(t, "duke-squad@local", gitLocalConfig(t, folderWorkspace.workspacePath, "user.email"))
 
 	workspaceFile := filepath.Join(folderWorkspace.workspacePath, "notes.txt")
 	require.NoError(t, os.WriteFile(workspaceFile, []byte("changed"), 0644))
@@ -90,4 +94,23 @@ func TestRemoteFolderWorkspaceExistsReturnsRunnerError(t *testing.T) {
 
 	require.False(t, exists)
 	require.ErrorContains(t, err, "permission denied")
+}
+
+func TestGetManagedWorkspaceDirectoryUsesDukeSquadConfigDir(t *testing.T) {
+	homeDir := t.TempDir()
+	t.Setenv("HOME", homeDir)
+
+	workspaceDir, err := getManagedWorkspaceDirectory(ProjectTransportLocal)
+
+	require.NoError(t, err)
+	require.Equal(t, filepath.Join(homeDir, ".duke-squad", "managed-workspaces"), workspaceDir)
+}
+
+func gitLocalConfig(t *testing.T, repoPath string, key string) string {
+	t.Helper()
+
+	cmd := exec.Command("git", "-C", repoPath, "config", "--local", "--get", key)
+	output, err := cmd.CombinedOutput()
+	require.NoError(t, err, string(output))
+	return strings.TrimSpace(string(output))
 }

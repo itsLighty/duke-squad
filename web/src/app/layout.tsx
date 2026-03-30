@@ -20,20 +20,20 @@ export const viewport: Viewport = {
 };
 
 export const metadata: Metadata = {
-  title: "Claude Squad - Manage Multiple AI Code Assistants",
-  description: "A terminal app that manages multiple AI code assistants (Claude Code, Codex, Aider, etc.) in separate workspaces, allowing you to work on multiple tasks simultaneously.",
-  keywords: ["claude", "claude squad", "ai", "code assistant", "terminal", "tmux", "claude code", "codex", "aider"],
-  authors: [{ name: "smtg-ai" }],
+  title: "Duke Squad - Manage Local and SSH AI Workspaces",
+  description: "A terminal app for running multiple AI coding agents across local folders and remote SSH projects with isolated workspaces.",
+  keywords: ["duke squad", "ai", "code assistant", "terminal", "tmux", "ssh", "codex", "claude code", "gemini"],
+  authors: [{ name: "itsLighty" }],
   openGraph: {
-    title: "Claude Squad",
-    description: "A terminal app that manages multiple AI code assistants in separate workspaces",
-    url: "https://github.com/smtg-ai/claude-squad",
+    title: "Duke Squad",
+    description: "A terminal app that manages multiple AI code assistants across local and SSH workspaces",
+    url: "https://github.com/itsLighty/duke-squad",
     type: "website",
   },
   twitter: {
     card: "summary_large_image",
-    title: "Claude Squad",
-    description: "A terminal app that manages multiple AI code assistants in separate workspaces",
+    title: "Duke Squad",
+    description: "A terminal app that manages multiple AI code assistants across local and SSH workspaces",
   },
 };
 

@@ -1,7 +1,9 @@
 version: 2.9
 
+project_name: duke-squad
+
 builds:
-  - binary: claude-squad
+  - binary: duke-squad
     goos:
       - darwin
       - linux
@@ -37,4 +39,3 @@ changelog:
       - typo
       - "^refactor"
       - "^chore"
-
