@@ -96,13 +96,13 @@ func (t *TerminalPane) UpdateContent(project *session.Project, instance *session
 		return nil
 	}
 
-	// Ensure we have a terminal session for this instance
-	if err := t.ensureSessionLocked(instance); err != nil {
+	// Ensure we have a terminal session for this instance.
+	s, err := t.ensureSessionForInstanceLocked(instance)
+	if err != nil {
 		return err
 	}
-
-	s, ok := t.sessions[t.currentTitle]
-	if !ok || s.tmuxSession == nil || !s.tmuxSession.DoesSessionExist() {
+	t.currentTitle = instance.ID
+	if s == nil || s.tmuxSession == nil || !s.tmuxSession.DoesSessionExist() {
 		t.setFallbackState("Terminal session not available.")
 		return nil
 	}
@@ -121,35 +121,39 @@ func (t *TerminalPane) UpdateContent(project *session.Project, instance *session
 func (t *TerminalPane) ensureSession(instance *session.Instance) error {
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	return t.ensureSessionLocked(instance)
+	_, err := t.ensureSessionForInstanceLocked(instance)
+	if err == nil && instance != nil {
+		t.currentTitle = instance.ID
+	}
+	return err
 }
 
-// ensureSessionLocked is the lock-free implementation of ensureSession.
+// ensureSessionForInstanceLocked creates or reuses a cached terminal session
+// without mutating the rendered pane content.
 // Caller must hold t.mu.
-func (t *TerminalPane) ensureSessionLocked(instance *session.Instance) error {
+func (t *TerminalPane) ensureSessionForInstanceLocked(instance *session.Instance) (*terminalSession, error) {
 	if instance == nil || !instance.Started() || instance.Status == session.Paused {
-		return nil
+		return nil, nil
 	}
 
 	worktreePath := instance.GetWorktreePath()
 	if worktreePath == "" {
-		return nil
+		return nil, nil
 	}
-
-	t.currentTitle = instance.ID
 
 	// Check if we already have a cached session for this instance
 	if s, ok := t.sessions[instance.ID]; ok {
 		if s.tmuxSession != nil && s.tmuxSession.DoesSessionExist() {
-			return nil
+			return s, nil
 		}
 		// Session died, remove stale entry and recreate below
 		delete(t.sessions, instance.ID)
 	}
 	if s, ok := t.sessions[instance.Title]; ok {
 		if s.tmuxSession != nil && s.tmuxSession.DoesSessionExist() {
-			t.currentTitle = instance.Title
-			return nil
+			t.sessions[instance.ID] = s
+			delete(t.sessions, instance.Title)
+			return s, nil
 		}
 		delete(t.sessions, instance.Title)
 	}
@@ -172,19 +176,20 @@ func (t *TerminalPane) ensureSessionLocked(instance *session.Instance) error {
 			_ = ts.Close()
 			ts = tmux.NewTmuxSessionWithRunner(termName, shell, instance.Runner())
 			if err := ts.Start(worktreePath); err != nil {
-				return fmt.Errorf("terminal pane: failed to start session: %w", err)
+				return nil, fmt.Errorf("terminal pane: failed to start session: %w", err)
 			}
 		}
 	} else {
 		if err := ts.Start(worktreePath); err != nil {
-			return fmt.Errorf("terminal pane: failed to start session: %w", err)
+			return nil, fmt.Errorf("terminal pane: failed to start session: %w", err)
 		}
 	}
 
-	t.sessions[instance.ID] = &terminalSession{
+	sessionState := &terminalSession{
 		tmuxSession:  ts,
 		worktreePath: worktreePath,
 	}
+	t.sessions[instance.ID] = sessionState
 
 	// Set the size
 	if t.width > 0 && t.height > 0 {
@@ -193,7 +198,59 @@ func (t *TerminalPane) ensureSessionLocked(instance *session.Instance) error {
 		}
 	}
 
-	return nil
+	return sessionState, nil
+}
+
+// captureSessionForContent resolves the terminal session for async capture and
+// updates currentTitle so attach/scroll target the current instance.
+func (t *TerminalPane) captureSessionForContent(instance *session.Instance) (*tmux.TmuxSession, error) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+
+	if instance == nil || instance.Status == session.Paused || !instance.Started() || t.isScrolling {
+		return nil, nil
+	}
+
+	s, err := t.ensureSessionForInstanceLocked(instance)
+	if err != nil {
+		return nil, err
+	}
+	t.currentTitle = instance.ID
+	if s == nil || s.tmuxSession == nil || !s.tmuxSession.DoesSessionExist() {
+		return nil, nil
+	}
+	return s.tmuxSession, nil
+}
+
+// CaptureContent returns terminal content for an instance without mutating the
+// rendered content state. Used by the async live-refresh path.
+func (t *TerminalPane) CaptureContent(instance *session.Instance) (string, error) {
+	ts, err := t.captureSessionForContent(instance)
+	if err != nil {
+		return "", err
+	}
+	if ts == nil {
+		return "", nil
+	}
+
+	content, err := ts.CapturePaneContent()
+	if err != nil {
+		return "", fmt.Errorf("terminal pane: failed to capture content: %w", err)
+	}
+	return content, nil
+}
+
+// SetTerminalContent updates terminal pane content directly from an async
+// capture. It does nothing while scroll mode is active.
+func (t *TerminalPane) SetTerminalContent(content string) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if t.isScrolling {
+		return
+	}
+	t.fallback = false
+	t.fallbackText = ""
+	t.content = content
 }
 
 // Attach attaches to the terminal tmux session (full-screen).

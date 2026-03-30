@@ -359,6 +359,140 @@ func TestKillConfirmationRemovesFolderSession(t *testing.T) {
 	require.Empty(t, project.Sessions)
 }
 
+func newLivePaneTestHome(t *testing.T) (*home, *session.Project, *session.Instance, *session.Instance) {
+	t.Helper()
+
+	spin := spinner.New(spinner.WithSpinner(spinner.MiniDot))
+	list := ui.NewList(&spin, false)
+
+	project := &session.Project{
+		ID:       "proj-live-pane",
+		Name:     "live-pane-project",
+		RootPath: t.TempDir(),
+		Kind:     session.ProjectKindFolder,
+		Sessions: []*session.Instance{},
+	}
+	list.AddProject(project)
+
+	instanceA, err := session.NewInstance(session.InstanceOptions{
+		ID:          "sess-a",
+		ProjectID:   project.ID,
+		ProjectKind: session.ProjectKindFolder,
+		Title:       "session-a",
+		Path:        project.RootPath,
+		Program:     "claude",
+	})
+	require.NoError(t, err)
+
+	instanceB, err := session.NewInstance(session.InstanceOptions{
+		ID:          "sess-b",
+		ProjectID:   project.ID,
+		ProjectKind: session.ProjectKindFolder,
+		Title:       "session-b",
+		Path:        project.RootPath,
+		Program:     "claude",
+	})
+	require.NoError(t, err)
+
+	list.AddSession(project.ID, instanceA)
+	list.AddSession(project.ID, instanceB)
+	list.SelectInstance(instanceA)
+
+	tabbedWindow := ui.NewTabbedWindow(ui.NewPreviewPane(), ui.NewDiffPane(), ui.NewTerminalPane())
+	tabbedWindow.SetSize(100, 40)
+
+	h := &home{
+		ctx:          context.Background(),
+		list:         list,
+		menu:         ui.NewMenu(),
+		tabbedWindow: tabbedWindow,
+		errBox:       ui.NewErrBox(),
+	}
+
+	return h, project, instanceA, instanceB
+}
+
+func TestPreviewCaptureDoneMsgAppliesContentForCurrentSelection(t *testing.T) {
+	h, _, instanceA, _ := newLivePaneTestHome(t)
+
+	model, cmd := h.Update(previewCaptureDoneMsg{
+		instanceID: instanceA.ID,
+		content:    "preview result",
+	})
+	require.Nil(t, cmd)
+
+	homeModel := model.(*home)
+	require.Contains(t, homeModel.tabbedWindow.String(), "preview result")
+}
+
+func TestPreviewCaptureDoneMsgIgnoresStaleSelection(t *testing.T) {
+	h, _, instanceA, instanceB := newLivePaneTestHome(t)
+
+	_, _ = h.Update(previewCaptureDoneMsg{
+		instanceID: instanceA.ID,
+		content:    "current preview",
+	})
+
+	h.list.SelectInstance(instanceB)
+	_, _ = h.Update(previewCaptureDoneMsg{
+		instanceID: instanceB.ID,
+		content:    "replacement preview",
+	})
+
+	model, cmd := h.Update(previewCaptureDoneMsg{
+		instanceID: instanceA.ID,
+		content:    "stale preview",
+	})
+	require.Nil(t, cmd)
+
+	homeModel := model.(*home)
+	rendered := homeModel.tabbedWindow.String()
+	require.Contains(t, rendered, "replacement preview")
+	require.NotContains(t, rendered, "stale preview")
+}
+
+func TestTerminalCaptureDoneMsgAppliesContentForCurrentSelection(t *testing.T) {
+	h, _, instanceA, _ := newLivePaneTestHome(t)
+	h.tabbedWindow.Toggle()
+	h.tabbedWindow.Toggle()
+
+	model, cmd := h.Update(terminalCaptureDoneMsg{
+		instanceID: instanceA.ID,
+		content:    "terminal result",
+	})
+	require.Nil(t, cmd)
+
+	homeModel := model.(*home)
+	require.Contains(t, homeModel.tabbedWindow.String(), "terminal result")
+}
+
+func TestTerminalCaptureDoneMsgIgnoresStaleTab(t *testing.T) {
+	h, _, instanceA, _ := newLivePaneTestHome(t)
+	h.tabbedWindow.Toggle()
+	h.tabbedWindow.Toggle()
+
+	_, _ = h.Update(terminalCaptureDoneMsg{
+		instanceID: instanceA.ID,
+		content:    "current terminal",
+	})
+
+	h.tabbedWindow.Toggle()
+
+	model, cmd := h.Update(terminalCaptureDoneMsg{
+		instanceID: instanceA.ID,
+		content:    "stale terminal",
+	})
+	require.Nil(t, cmd)
+
+	homeModel := model.(*home)
+	homeModel.tabbedWindow.Toggle()
+	homeModel.tabbedWindow.Toggle()
+
+	rendered := homeModel.tabbedWindow.String()
+	require.Contains(t, rendered, "current terminal")
+	require.NotContains(t, rendered, "stale terminal")
+}
+
 func TestAddProjectCancelResetsMenuState(t *testing.T) {
 	spin := spinner.New(spinner.WithSpinner(spinner.MiniDot))
 	list := ui.NewList(&spin, false)

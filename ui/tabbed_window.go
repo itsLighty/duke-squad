@@ -113,6 +113,13 @@ func (w *TabbedWindow) UpdatePreview(project *session.Project, instance *session
 	return w.preview.UpdateContent(project, instance)
 }
 
+func (w *TabbedWindow) SetPreviewContent(content string) {
+	if w.activeTab != PreviewTab {
+		return
+	}
+	w.preview.SetPreviewContent(content)
+}
+
 func (w *TabbedWindow) UpdateDiff(project *session.Project, instance *session.Instance) {
 	if w.activeTab != DiffTab {
 		return
@@ -126,6 +133,17 @@ func (w *TabbedWindow) UpdateTerminal(project *session.Project, instance *sessio
 		return nil
 	}
 	return w.terminal.UpdateContent(project, instance)
+}
+
+func (w *TabbedWindow) SetTerminalContent(content string) {
+	if w.activeTab != TerminalTab {
+		return
+	}
+	w.terminal.SetTerminalContent(content)
+}
+
+func (w *TabbedWindow) CaptureTerminalContent(instance *session.Instance) (string, error) {
+	return w.terminal.CaptureContent(instance)
 }
 
 // ResetPreviewToNormalMode resets the preview pane to normal mode

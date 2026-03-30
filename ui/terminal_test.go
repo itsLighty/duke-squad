@@ -273,6 +273,66 @@ func TestTerminalSessionCaching(t *testing.T) {
 	tp.mu.Unlock()
 }
 
+func TestSetTerminalContentUpdatesPaneWithoutFallback(t *testing.T) {
+	tp := NewTerminalPane()
+	tp.SetSize(80, 30)
+
+	tp.mu.Lock()
+	tp.fallback = true
+	tp.fallbackText = "old fallback"
+	tp.mu.Unlock()
+
+	tp.SetTerminalContent("fresh terminal")
+
+	tp.mu.Lock()
+	defer tp.mu.Unlock()
+	require.False(t, tp.fallback)
+	require.Equal(t, "fresh terminal", tp.content)
+}
+
+func TestSetTerminalContentDoesNothingWhileScrolling(t *testing.T) {
+	tp := NewTerminalPane()
+	tp.SetSize(80, 30)
+
+	tp.mu.Lock()
+	tp.content = "existing terminal"
+	tp.isScrolling = true
+	tp.mu.Unlock()
+
+	tp.SetTerminalContent("new terminal")
+
+	tp.mu.Lock()
+	defer tp.mu.Unlock()
+	require.Equal(t, "existing terminal", tp.content)
+}
+
+func TestTerminalCaptureContentDoesNotMutatePaneState(t *testing.T) {
+	log.Initialize(false)
+	defer log.Close()
+
+	expectedContent := "$ pwd\n/tmp/worktree"
+	cmdExec := mockCmdExec(expectedContent, true)
+
+	instance := makeStartedInstance(t, "capture-content")
+	defer func() { _ = instance.Kill() }()
+
+	tp := NewTerminalPane()
+	tp.SetSize(80, 30)
+
+	ts := newMockTmuxSession(t, "mock-capture", cmdExec)
+	injectSession(tp, instance.ID, ts, t.TempDir())
+
+	captured, err := tp.CaptureContent(instance)
+	require.NoError(t, err)
+	require.Equal(t, expectedContent, captured)
+
+	tp.mu.Lock()
+	defer tp.mu.Unlock()
+	require.Empty(t, tp.content)
+	require.False(t, tp.fallback)
+	require.Equal(t, instance.ID, tp.currentTitle)
+}
+
 func TestTerminalScrolling(t *testing.T) {
 	log.Initialize(false)
 	defer log.Close()

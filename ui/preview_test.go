@@ -420,6 +420,31 @@ func TestPreviewContentWithoutScrolling(t *testing.T) {
 	require.Contains(t, renderedString, "test", "Rendered preview should contain the test content")
 }
 
+func TestSetPreviewContentUpdatesPaneWithoutFallback(t *testing.T) {
+	previewPane := NewPreviewPane()
+	previewPane.SetSize(80, 30)
+	previewPane.setFallbackState("old fallback")
+
+	previewPane.SetPreviewContent("fresh preview")
+
+	require.False(t, previewPane.previewState.fallback)
+	require.Equal(t, "fresh preview", previewPane.previewState.text)
+}
+
+func TestSetPreviewContentDoesNothingWhileScrolling(t *testing.T) {
+	previewPane := NewPreviewPane()
+	previewPane.SetSize(80, 30)
+	previewPane.previewState = previewState{
+		fallback: false,
+		text:     "existing preview",
+	}
+	previewPane.isScrolling = true
+
+	previewPane.SetPreviewContent("new preview")
+
+	require.Equal(t, "existing preview", previewPane.previewState.text)
+}
+
 // Helper function for max
 func max(a, b int) int {
 	if a > b {

@@ -208,14 +208,9 @@ func (m *home) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case hideErrMsg:
 		m.errBox.Clear()
 	case previewTickMsg:
-		cmd := m.instanceChanged()
-		return m, tea.Batch(
-			cmd,
-			func() tea.Msg {
-				time.Sleep(100 * time.Millisecond)
-				return previewTickMsg{}
-			},
-		)
+		selection := m.list.GetSelection()
+		m.applySelectionChrome(selection.Project, selection.Instance)
+		return m, m.refreshLivePane(selection.Project, selection.Instance, true)
 	case keyupMsg:
 		m.menu.ClearKeydown()
 		return m, nil
@@ -270,6 +265,32 @@ func (m *home) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 		return m, tickUpdateMetadataCmd(m.snapshotActiveInstances())
+	case previewCaptureDoneMsg:
+		nextCmd := m.livePaneFollowupCmd(msg.scheduleNext)
+		if !m.shouldApplyPreviewCapture(msg.instanceID) {
+			return m, nextCmd
+		}
+		if msg.err != nil {
+			if nextCmd != nil {
+				return m, tea.Batch(m.handleError(msg.err), nextCmd)
+			}
+			return m, m.handleError(msg.err)
+		}
+		m.tabbedWindow.SetPreviewContent(msg.content)
+		return m, nextCmd
+	case terminalCaptureDoneMsg:
+		nextCmd := m.livePaneFollowupCmd(msg.scheduleNext)
+		if !m.shouldApplyTerminalCapture(msg.instanceID) {
+			return m, nextCmd
+		}
+		if msg.err != nil {
+			if nextCmd != nil {
+				return m, tea.Batch(m.handleError(msg.err), nextCmd)
+			}
+			return m, m.handleError(msg.err)
+		}
+		m.tabbedWindow.SetTerminalContent(msg.content)
+		return m, nextCmd
 	case tea.MouseMsg:
 		// Handle mouse wheel events for scrolling the diff/preview pane
 		if msg.Action == tea.MouseActionPress {
@@ -735,20 +756,62 @@ func (m *home) instanceChanged() tea.Cmd {
 	selected := selection.Instance
 	project := selection.Project
 
+	m.applySelectionChrome(project, selected)
+	return m.refreshLivePane(project, selected, false)
+}
+
+func (m *home) applySelectionChrome(project *session.Project, selected *session.Instance) {
 	m.tabbedWindow.UpdateDiff(project, selected)
 	m.tabbedWindow.SetSelection(project, selected)
-	// Update menu with current instance
 	m.menu.SetInstance(selected)
 	m.menu.SetProject(project, m.list.IsProjectSelected())
+}
 
-	// If there's no selected instance, we don't need to update the preview.
-	if err := m.tabbedWindow.UpdatePreview(project, selected); err != nil {
-		return m.handleError(err)
+func (m *home) refreshLivePane(project *session.Project, selected *session.Instance, scheduleNext bool) tea.Cmd {
+	switch {
+	case m.tabbedWindow.IsInPreviewTab():
+		if m.shouldSyncPreviewRefresh(selected) {
+			if err := m.tabbedWindow.UpdatePreview(project, selected); err != nil {
+				if scheduleNext {
+					return tea.Batch(m.handleError(err), nextPreviewTickCmd)
+				}
+				return m.handleError(err)
+			}
+			return m.livePaneFollowupCmd(scheduleNext)
+		}
+		instanceID := selected.ID
+		return func() tea.Msg {
+			content, err := selected.Preview()
+			return previewCaptureDoneMsg{
+				instanceID:   instanceID,
+				content:      content,
+				err:          err,
+				scheduleNext: scheduleNext,
+			}
+		}
+	case m.tabbedWindow.IsInTerminalTab():
+		if m.shouldSyncTerminalRefresh(selected) {
+			if err := m.tabbedWindow.UpdateTerminal(project, selected); err != nil {
+				if scheduleNext {
+					return tea.Batch(m.handleError(err), nextPreviewTickCmd)
+				}
+				return m.handleError(err)
+			}
+			return m.livePaneFollowupCmd(scheduleNext)
+		}
+		instanceID := selected.ID
+		return func() tea.Msg {
+			content, err := m.tabbedWindow.CaptureTerminalContent(selected)
+			return terminalCaptureDoneMsg{
+				instanceID:   instanceID,
+				content:      content,
+				err:          err,
+				scheduleNext: scheduleNext,
+			}
+		}
+	default:
+		return m.livePaneFollowupCmd(scheduleNext)
 	}
-	if err := m.tabbedWindow.UpdateTerminal(project, selected); err != nil {
-		return m.handleError(err)
-	}
-	return nil
 }
 
 type keyupMsg struct{}
@@ -772,6 +835,20 @@ type hideErrMsg struct{}
 // previewTickMsg implements tea.Msg and triggers a preview update
 type previewTickMsg struct{}
 
+type previewCaptureDoneMsg struct {
+	instanceID   string
+	content      string
+	err          error
+	scheduleNext bool
+}
+
+type terminalCaptureDoneMsg struct {
+	instanceID   string
+	content      string
+	err          error
+	scheduleNext bool
+}
+
 type instanceChangedMsg struct{}
 
 // branchSearchDebounceMsg fires after the debounce interval to trigger a search.
@@ -787,6 +864,11 @@ type branchSearchResultMsg struct {
 }
 
 const branchSearchDebounce = 150 * time.Millisecond
+
+var nextPreviewTickCmd tea.Cmd = func() tea.Msg {
+	time.Sleep(100 * time.Millisecond)
+	return previewTickMsg{}
+}
 
 // scheduleBranchSearch returns a debounced tea.Cmd: sleeps, then triggers a search message.
 func (m *home) scheduleBranchSearch(filter string, version uint64) tea.Cmd {
@@ -815,6 +897,44 @@ func (m *home) runBranchSearch(filter string, version uint64) tea.Cmd {
 		}
 		return branchSearchResultMsg{branches: branches, version: version}
 	}
+}
+
+func (m *home) livePaneFollowupCmd(scheduleNext bool) tea.Cmd {
+	if scheduleNext {
+		return nextPreviewTickCmd
+	}
+	return nil
+}
+
+func (m *home) shouldSyncPreviewRefresh(selected *session.Instance) bool {
+	return selected == nil ||
+		selected.Status == session.Loading ||
+		selected.Status == session.Paused ||
+		!selected.Started() ||
+		!selected.TmuxAlive() ||
+		m.tabbedWindow.IsPreviewInScrollMode()
+}
+
+func (m *home) shouldSyncTerminalRefresh(selected *session.Instance) bool {
+	return selected == nil ||
+		selected.Status == session.Loading ||
+		selected.Status == session.Paused ||
+		!selected.Started() ||
+		m.tabbedWindow.IsTerminalInScrollMode()
+}
+
+func (m *home) shouldApplyPreviewCapture(instanceID string) bool {
+	selected := m.list.GetSelectedInstance()
+	return m.tabbedWindow.IsInPreviewTab() &&
+		selected != nil &&
+		selected.ID == instanceID
+}
+
+func (m *home) shouldApplyTerminalCapture(instanceID string) bool {
+	selected := m.list.GetSelectedInstance()
+	return m.tabbedWindow.IsInTerminalTab() &&
+		selected != nil &&
+		selected.ID == instanceID
 }
 
 // instanceMetaResult holds the results of a single instance's metadata update,

@@ -130,6 +130,18 @@ func (p *PreviewPane) UpdateContent(project *session.Project, instance *session.
 	return nil
 }
 
+// SetPreviewContent updates the preview content directly from an async capture.
+// It does nothing while scroll mode is active to avoid clobbering viewport state.
+func (p *PreviewPane) SetPreviewContent(content string) {
+	if p.isScrolling {
+		return
+	}
+	p.previewState = previewState{
+		fallback: false,
+		text:     content,
+	}
+}
+
 // Returns the preview pane content as a string.
 func (p *PreviewPane) String() string {
 	if p.width == 0 || p.height == 0 {
