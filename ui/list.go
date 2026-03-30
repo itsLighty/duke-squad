@@ -98,9 +98,9 @@ func (l *List) GetProjects() []*session.Project {
 }
 
 func (l *List) SetSize(width, height int) {
-	l.width = width
-	l.height = height
-	l.renderer.setWidth(width)
+	l.width = clampDimension(width)
+	l.height = clampDimension(height)
+	l.renderer.setWidth(l.width)
 }
 
 func (l *List) SetSessionPreviewSize(width, height int) (err error) {
@@ -136,7 +136,7 @@ type InstanceRenderer struct {
 }
 
 func (r *InstanceRenderer) setWidth(width int) {
-	r.width = AdjustPreviewWidth(width)
+	r.width = clampDimension(width)
 }
 
 func (r *InstanceRenderer) renderProject(project *session.Project, selected bool) string {
@@ -242,7 +242,7 @@ func (l *List) String() string {
 	var b strings.Builder
 	b.WriteString("\n\n")
 
-	titleWidth := AdjustPreviewWidth(l.width) + 2
+	titleWidth := l.width
 	if !l.autoyes {
 		b.WriteString(lipgloss.Place(titleWidth, 1, lipgloss.Left, lipgloss.Bottom, mainTitle.Render(titleText)))
 	} else {

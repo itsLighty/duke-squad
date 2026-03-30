@@ -35,10 +35,10 @@ func NewPreviewPane() *PreviewPane {
 }
 
 func (p *PreviewPane) SetSize(width, maxHeight int) {
-	p.width = width
-	p.height = maxHeight
-	p.viewport.Width = width
-	p.viewport.Height = maxHeight
+	p.width = clampDimension(width)
+	p.height = clampDimension(maxHeight)
+	p.viewport.Width = p.width
+	p.viewport.Height = p.height
 }
 
 // setFallbackState sets the preview state with fallback text and a message
@@ -149,13 +149,10 @@ func (p *PreviewPane) String() string {
 	}
 
 	if p.previewState.fallback {
-		// Calculate available height for fallback text
-		availableHeight := p.height - 3 - 4 // 2 for borders, 1 for margin, 1 for padding
+		availableHeight := p.height
 
-		// Count the number of lines in the fallback text
 		fallbackLines := len(strings.Split(p.previewState.text, "\n"))
 
-		// Calculate padding needed above and below to center the content
 		totalPadding := availableHeight - fallbackLines
 		topPadding := 0
 		bottomPadding := 0
@@ -164,7 +161,6 @@ func (p *PreviewPane) String() string {
 			bottomPadding = totalPadding - topPadding // accounts for odd numbers
 		}
 
-		// Build the centered content
 		var lines []string
 		if topPadding > 0 {
 			lines = append(lines, strings.Repeat("\n", topPadding))
@@ -174,7 +170,6 @@ func (p *PreviewPane) String() string {
 			lines = append(lines, strings.Repeat("\n", bottomPadding))
 		}
 
-		// Center both vertically and horizontally
 		return previewPaneStyle.
 			Width(p.width).
 			Align(lipgloss.Center).
@@ -275,25 +270,32 @@ func (p *PreviewPane) ScrollDown(instance *session.Instance) error {
 	return nil
 }
 
+func (p *PreviewPane) ResetScrollMode() {
+	if !p.isScrolling {
+		return
+	}
+	p.isScrolling = false
+	p.viewport.SetContent("")
+	p.viewport.GotoTop()
+}
+
 // ResetToNormalMode exits scroll mode and returns to normal mode
 func (p *PreviewPane) ResetToNormalMode(instance *session.Instance) error {
+	if !p.isScrolling {
+		return nil
+	}
+
+	p.ResetScrollMode()
+
 	if instance == nil || instance.Status == session.Paused || !instance.TmuxAlive() {
 		return nil
 	}
 
-	if p.isScrolling {
-		p.isScrolling = false
-		// Reset viewport
-		p.viewport.SetContent("")
-		p.viewport.GotoTop()
-
-		// Immediately update content instead of waiting for next UpdateContent call
-		content, err := instance.Preview()
-		if err != nil {
-			return err
-		}
-		p.previewState.text = content
+	content, err := instance.Preview()
+	if err != nil {
+		return err
 	}
+	p.previewState.text = content
 
 	return nil
 }

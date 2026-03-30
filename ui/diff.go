@@ -30,10 +30,10 @@ func NewDiffPane() *DiffPane {
 }
 
 func (d *DiffPane) SetSize(width, height int) {
-	d.width = width
-	d.height = height
-	d.viewport.Width = width
-	d.viewport.Height = height
+	d.width = clampDimension(width)
+	d.height = clampDimension(height)
+	d.viewport.Width = d.width
+	d.viewport.Height = d.height
 	// Update viewport content if diff exists
 	if d.diff != "" || d.stats != "" {
 		d.viewport.SetContent(lipgloss.JoinVertical(lipgloss.Left, d.stats, d.diff))
@@ -116,6 +116,10 @@ func (d *DiffPane) ScrollUp() {
 // ScrollDown scrolls the viewport down
 func (d *DiffPane) ScrollDown() {
 	d.viewport.LineDown(1)
+}
+
+func (d *DiffPane) ResetScroll() {
+	d.viewport.GotoTop()
 }
 
 func colorizeDiff(diff string) string {

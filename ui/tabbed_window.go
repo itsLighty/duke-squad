@@ -75,22 +75,17 @@ func (w *TabbedWindow) SetSelection(project *session.Project, instance *session.
 	w.instance = instance
 }
 
-// AdjustPreviewWidth adjusts the width of the preview pane to be 90% of the provided width.
-func AdjustPreviewWidth(width int) int {
-	return int(float64(width) * 0.9)
+func (w *TabbedWindow) paneSize() (width int, height int) {
+	tabHeight := activeTabStyle.GetVerticalFrameSize() + 1
+	return clampDimension(w.width - windowStyle.GetHorizontalFrameSize()),
+		clampDimension(w.height - tabHeight - windowStyle.GetVerticalFrameSize())
 }
 
 func (w *TabbedWindow) SetSize(width, height int) {
-	w.width = AdjustPreviewWidth(width)
-	w.height = height
+	w.width = clampDimension(width)
+	w.height = clampDimension(height)
 
-	// Calculate the content height by subtracting:
-	// 1. Tab height (including border and padding)
-	// 2. Window style vertical frame size
-	// 3. Additional padding/spacing (2 for the newline and spacing)
-	tabHeight := activeTabStyle.GetVerticalFrameSize() + 1
-	contentHeight := height - tabHeight - windowStyle.GetVerticalFrameSize() - 2
-	contentWidth := w.width - windowStyle.GetHorizontalFrameSize()
+	contentWidth, contentHeight := w.paneSize()
 
 	w.preview.SetSize(contentWidth, contentHeight)
 	w.diff.SetSize(contentWidth, contentHeight)
@@ -234,6 +229,12 @@ func (w *TabbedWindow) ResetTerminalToNormalMode() {
 	w.terminal.ResetToNormalMode()
 }
 
+func (w *TabbedWindow) ResetTransientState() {
+	w.preview.ResetScrollMode()
+	w.diff.ResetScroll()
+	w.terminal.ResetToNormalMode()
+}
+
 func (w *TabbedWindow) String() string {
 	if w.width == 0 || w.height == 0 {
 		return ""
@@ -241,10 +242,10 @@ func (w *TabbedWindow) String() string {
 
 	var renderedTabs []string
 
-	totalTabWidth := w.width + windowStyle.GetHorizontalFrameSize()
+	contentWidth, contentHeight := w.paneSize()
+	totalTabWidth := w.width
 	tabWidth := totalTabWidth / len(w.tabs)
 	lastTabWidth := totalTabWidth - tabWidth*(len(w.tabs)-1)
-	tabHeight := activeTabStyle.GetVerticalFrameSize() + 1 // get padding border margin size + 1 for character height
 
 	for i, t := range w.tabs {
 		width := tabWidth
@@ -270,7 +271,7 @@ func (w *TabbedWindow) String() string {
 			border.BottomRight = "┤"
 		}
 		style = style.Border(border)
-		style = style.Width(width - style.GetHorizontalFrameSize())
+		style = style.Width(max(0, width-style.GetHorizontalFrameSize()))
 		renderedTabs = append(renderedTabs, style.Render(t))
 	}
 
@@ -286,8 +287,8 @@ func (w *TabbedWindow) String() string {
 	}
 	window := windowStyle.Render(
 		lipgloss.Place(
-			w.width, w.height-2-windowStyle.GetVerticalFrameSize()-tabHeight,
+			contentWidth, contentHeight,
 			lipgloss.Left, lipgloss.Top, content))
 
-	return lipgloss.JoinVertical(lipgloss.Left, "\n", row, window)
+	return lipgloss.JoinVertical(lipgloss.Left, row, window)
 }

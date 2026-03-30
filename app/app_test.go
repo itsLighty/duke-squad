@@ -451,6 +451,45 @@ func TestPreviewCaptureDoneMsgIgnoresStaleSelection(t *testing.T) {
 	require.NotContains(t, rendered, "stale preview")
 }
 
+func TestPreviewCaptureDoneMsgIgnoresStaleSelectionGeneration(t *testing.T) {
+	h, project, instanceA, _ := newLivePaneTestHome(t)
+
+	initialGeneration := h.livePaneGeneration
+
+	_, _ = h.Update(previewCaptureDoneMsg{
+		instanceID:          instanceA.ID,
+		selectionGeneration: initialGeneration,
+		content:             "initial preview",
+	})
+
+	h.list.SelectProject(project)
+	_, _ = h.Update(instanceChangedMsg{})
+
+	h.list.SelectInstance(instanceA)
+	_, _ = h.Update(instanceChangedMsg{})
+
+	currentGeneration := h.livePaneGeneration
+	require.NotEqual(t, initialGeneration, currentGeneration)
+
+	_, _ = h.Update(previewCaptureDoneMsg{
+		instanceID:          instanceA.ID,
+		selectionGeneration: currentGeneration,
+		content:             "fresh preview",
+	})
+
+	model, cmd := h.Update(previewCaptureDoneMsg{
+		instanceID:          instanceA.ID,
+		selectionGeneration: initialGeneration,
+		content:             "stale preview",
+	})
+	require.Nil(t, cmd)
+
+	homeModel := model.(*home)
+	rendered := homeModel.tabbedWindow.String()
+	require.Contains(t, rendered, "fresh preview")
+	require.NotContains(t, rendered, "stale preview")
+}
+
 func TestTerminalCaptureDoneMsgAppliesContentForCurrentSelection(t *testing.T) {
 	h, _, instanceA, _ := newLivePaneTestHome(t)
 	h.tabbedWindow.Toggle()
@@ -491,6 +530,64 @@ func TestTerminalCaptureDoneMsgIgnoresStaleTab(t *testing.T) {
 	rendered := homeModel.tabbedWindow.String()
 	require.Contains(t, rendered, "current terminal")
 	require.NotContains(t, rendered, "stale terminal")
+}
+
+func TestTerminalCaptureDoneMsgIgnoresStaleSelectionGeneration(t *testing.T) {
+	h, project, instanceA, _ := newLivePaneTestHome(t)
+	h.tabbedWindow.Toggle()
+	h.tabbedWindow.Toggle()
+
+	initialGeneration := h.livePaneGeneration
+
+	_, _ = h.Update(terminalCaptureDoneMsg{
+		instanceID:          instanceA.ID,
+		selectionGeneration: initialGeneration,
+		content:             "initial terminal",
+	})
+
+	h.list.SelectProject(project)
+	_, _ = h.Update(instanceChangedMsg{})
+
+	h.list.SelectInstance(instanceA)
+	_, _ = h.Update(instanceChangedMsg{})
+
+	currentGeneration := h.livePaneGeneration
+	require.NotEqual(t, initialGeneration, currentGeneration)
+
+	_, _ = h.Update(terminalCaptureDoneMsg{
+		instanceID:          instanceA.ID,
+		selectionGeneration: currentGeneration,
+		content:             "fresh terminal",
+	})
+
+	model, cmd := h.Update(terminalCaptureDoneMsg{
+		instanceID:          instanceA.ID,
+		selectionGeneration: initialGeneration,
+		content:             "stale terminal",
+	})
+	require.Nil(t, cmd)
+
+	homeModel := model.(*home)
+	rendered := homeModel.tabbedWindow.String()
+	require.Contains(t, rendered, "fresh terminal")
+	require.NotContains(t, rendered, "stale terminal")
+}
+
+func TestWindowSizeUsesFullTabbedPaneWidth(t *testing.T) {
+	spin := spinner.New(spinner.WithSpinner(spinner.MiniDot))
+
+	h := &home{
+		ctx:          context.Background(),
+		list:         ui.NewList(&spin, false),
+		menu:         ui.NewMenu(),
+		tabbedWindow: ui.NewTabbedWindow(ui.NewPreviewPane(), ui.NewDiffPane(), ui.NewTerminalPane()),
+		errBox:       ui.NewErrBox(),
+	}
+
+	h.updateHandleWindowSizeEvent(tea.WindowSizeMsg{Width: 120, Height: 40})
+
+	previewWidth, _ := h.tabbedWindow.GetPreviewSize()
+	require.GreaterOrEqual(t, previewWidth, 80)
 }
 
 func TestAddProjectCancelResetsMenuState(t *testing.T) {

@@ -50,12 +50,12 @@ func NewTerminalPane() *TerminalPane {
 func (t *TerminalPane) SetSize(width, height int) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	t.width = width
-	t.height = height
-	t.viewport.Width = width
-	t.viewport.Height = height
+	t.width = clampDimension(width)
+	t.height = clampDimension(height)
+	t.viewport.Width = t.width
+	t.viewport.Height = t.height
 	if s, ok := t.sessions[t.currentTitle]; ok && s.tmuxSession != nil {
-		if err := s.tmuxSession.SetDetachedSize(width, height); err != nil {
+		if err := s.tmuxSession.SetDetachedSize(t.width, t.height); err != nil {
 			log.InfoLog.Printf("terminal pane: failed to set detached size: %v", err)
 		}
 	}
@@ -319,17 +319,12 @@ func (t *TerminalPane) String() string {
 		return strings.Repeat("\n", height)
 	}
 
-	if t.isScrolling {
-		return t.viewport.View()
-	}
-
 	fallback := t.fallback
 	fallbackText := t.fallbackText
 	content := t.content
 
 	if fallback {
-		// 3 = tab bar height (border + padding + text), 4 = window style frame (top/bottom border + padding)
-		availableHeight := height - 3 - 4
+		availableHeight := height
 		fallbackLines := len(strings.Split(fallbackText, "\n"))
 		totalPadding := availableHeight - fallbackLines
 		topPadding := 0
@@ -352,6 +347,10 @@ func (t *TerminalPane) String() string {
 			Width(width).
 			Align(lipgloss.Center).
 			Render(strings.Join(lines, ""))
+	}
+
+	if t.isScrolling {
+		return t.viewport.View()
 	}
 
 	// Normal mode: show captured content

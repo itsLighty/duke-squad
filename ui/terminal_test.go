@@ -306,6 +306,22 @@ func TestSetTerminalContentDoesNothingWhileScrolling(t *testing.T) {
 	require.Equal(t, "existing terminal", tp.content)
 }
 
+func TestTerminalFallbackOverridesStaleScrollViewport(t *testing.T) {
+	tp := NewTerminalPane()
+	tp.SetSize(80, 30)
+
+	tp.mu.Lock()
+	tp.isScrolling = true
+	tp.viewport.SetContent("stale terminal history")
+	tp.fallback = true
+	tp.fallbackText = "Select a session in this project to open a terminal"
+	tp.mu.Unlock()
+
+	rendered := tp.String()
+	require.Contains(t, rendered, "Select a session in this project to open a terminal")
+	require.NotContains(t, rendered, "stale terminal history")
+}
+
 func TestTerminalCaptureContentDoesNotMutatePaneState(t *testing.T) {
 	log.Initialize(false)
 	defer log.Close()

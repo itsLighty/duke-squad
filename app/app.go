@@ -81,6 +81,9 @@ type home struct {
 	instanceStarting bool
 	// startingInstance holds a reference to the instance being started in the background.
 	startingInstance *session.Instance
+	// livePaneGeneration invalidates async pane captures when selection state changes.
+	livePaneGeneration uint64
+	livePaneSelection  livePaneSelection
 
 	// -- UI Components --
 
@@ -101,6 +104,33 @@ type home struct {
 	textOverlay *overlay.TextOverlay
 	// confirmationOverlay displays confirmation modals
 	confirmationOverlay *overlay.ConfirmationOverlay
+}
+
+type livePaneSelection struct {
+	projectID  string
+	instanceID string
+	activeTab  int
+}
+
+const (
+	minProjectListWidth = 18
+	minMainPaneWidth    = 40
+)
+
+func computeHorizontalLayout(totalWidth int) (listWidth int, paneWidth int) {
+	totalWidth = max(1, totalWidth)
+
+	listWidth = totalWidth * 3 / 10
+	maxListWidth := max(1, totalWidth-1)
+	if totalWidth > minMainPaneWidth {
+		listWidth = max(minProjectListWidth, listWidth)
+		maxListWidth = max(1, totalWidth-minMainPaneWidth)
+	} else {
+		listWidth = max(1, totalWidth/4)
+	}
+	listWidth = min(listWidth, maxListWidth)
+	paneWidth = max(1, totalWidth-listWidth)
+	return listWidth, paneWidth
 }
 
 func newHome(ctx context.Context, program string, autoYes bool, programOverridden bool) *home {
@@ -161,33 +191,32 @@ func newHome(ctx context.Context, program string, autoYes bool, programOverridde
 // updateHandleWindowSizeEvent sets the sizes of the components.
 // The components will try to render inside their bounds.
 func (m *home) updateHandleWindowSizeEvent(msg tea.WindowSizeMsg) {
-	// List takes 30% of width, preview takes 70%
-	listWidth := int(float32(msg.Width) * 0.3)
-	tabsWidth := msg.Width - listWidth
+	totalWidth := max(1, msg.Width)
+	totalHeight := max(3, msg.Height)
 
-	// Menu takes 10% of height, list and window take 90%
-	contentHeight := int(float32(msg.Height) * 0.9)
-	menuHeight := msg.Height - contentHeight - 1     // minus 1 for error box
-	m.errBox.SetSize(int(float32(msg.Width)*0.9), 1) // error box takes 1 row
+	listWidth, tabsWidth := computeHorizontalLayout(totalWidth)
+	contentHeight := max(1, totalHeight-2)
+	menuHeight := 1
+	m.errBox.SetSize(totalWidth, 1)
 
 	m.tabbedWindow.SetSize(tabsWidth, contentHeight)
 	m.list.SetSize(listWidth, contentHeight)
 
 	if m.textInputOverlay != nil {
-		m.textInputOverlay.SetSize(int(float32(msg.Width)*0.6), int(float32(msg.Height)*0.4))
+		m.textInputOverlay.SetSize(max(1, int(float32(totalWidth)*0.6)), max(1, int(float32(totalHeight)*0.4)))
 	}
 	if m.projectOverlay != nil {
-		m.projectOverlay.SetSize(int(float32(msg.Width)*0.6), int(float32(msg.Height)*0.4))
+		m.projectOverlay.SetSize(max(1, int(float32(totalWidth)*0.6)), max(1, int(float32(totalHeight)*0.4)))
 	}
 	if m.textOverlay != nil {
-		m.textOverlay.SetWidth(int(float32(msg.Width) * 0.6))
+		m.textOverlay.SetWidth(max(1, int(float32(totalWidth)*0.6)))
 	}
 
 	previewWidth, previewHeight := m.tabbedWindow.GetPreviewSize()
 	if err := m.list.SetSessionPreviewSize(previewWidth, previewHeight); err != nil {
 		log.ErrorLog.Print(err)
 	}
-	m.menu.SetSize(msg.Width, menuHeight)
+	m.menu.SetSize(totalWidth, menuHeight)
 }
 
 func (m *home) Init() tea.Cmd {
@@ -267,7 +296,7 @@ func (m *home) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, tickUpdateMetadataCmd(m.snapshotActiveInstances())
 	case previewCaptureDoneMsg:
 		nextCmd := m.livePaneFollowupCmd(msg.scheduleNext)
-		if !m.shouldApplyPreviewCapture(msg.instanceID) {
+		if !m.shouldApplyPreviewCapture(msg.instanceID, msg.selectionGeneration) {
 			return m, nextCmd
 		}
 		if msg.err != nil {
@@ -280,7 +309,7 @@ func (m *home) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nextCmd
 	case terminalCaptureDoneMsg:
 		nextCmd := m.livePaneFollowupCmd(msg.scheduleNext)
-		if !m.shouldApplyTerminalCapture(msg.instanceID) {
+		if !m.shouldApplyTerminalCapture(msg.instanceID, msg.selectionGeneration) {
 			return m, nextCmd
 		}
 		if msg.err != nil {
@@ -761,6 +790,19 @@ func (m *home) instanceChanged() tea.Cmd {
 }
 
 func (m *home) applySelectionChrome(project *session.Project, selected *session.Instance) {
+	current := livePaneSelection{activeTab: m.tabbedWindow.GetActiveTab()}
+	if project != nil {
+		current.projectID = project.ID
+	}
+	if selected != nil {
+		current.instanceID = selected.ID
+	}
+	if current != m.livePaneSelection {
+		m.tabbedWindow.ResetTransientState()
+		m.livePaneSelection = current
+		m.livePaneGeneration++
+	}
+
 	m.tabbedWindow.UpdateDiff(project, selected)
 	m.tabbedWindow.SetSelection(project, selected)
 	m.menu.SetInstance(selected)
@@ -780,13 +822,15 @@ func (m *home) refreshLivePane(project *session.Project, selected *session.Insta
 			return m.livePaneFollowupCmd(scheduleNext)
 		}
 		instanceID := selected.ID
+		generation := m.livePaneGeneration
 		return func() tea.Msg {
 			content, err := selected.Preview()
 			return previewCaptureDoneMsg{
-				instanceID:   instanceID,
-				content:      content,
-				err:          err,
-				scheduleNext: scheduleNext,
+				instanceID:          instanceID,
+				selectionGeneration: generation,
+				content:             content,
+				err:                 err,
+				scheduleNext:        scheduleNext,
 			}
 		}
 	case m.tabbedWindow.IsInTerminalTab():
@@ -800,13 +844,15 @@ func (m *home) refreshLivePane(project *session.Project, selected *session.Insta
 			return m.livePaneFollowupCmd(scheduleNext)
 		}
 		instanceID := selected.ID
+		generation := m.livePaneGeneration
 		return func() tea.Msg {
 			content, err := m.tabbedWindow.CaptureTerminalContent(selected)
 			return terminalCaptureDoneMsg{
-				instanceID:   instanceID,
-				content:      content,
-				err:          err,
-				scheduleNext: scheduleNext,
+				instanceID:          instanceID,
+				selectionGeneration: generation,
+				content:             content,
+				err:                 err,
+				scheduleNext:        scheduleNext,
 			}
 		}
 	default:
@@ -836,17 +882,19 @@ type hideErrMsg struct{}
 type previewTickMsg struct{}
 
 type previewCaptureDoneMsg struct {
-	instanceID   string
-	content      string
-	err          error
-	scheduleNext bool
+	instanceID          string
+	selectionGeneration uint64
+	content             string
+	err                 error
+	scheduleNext        bool
 }
 
 type terminalCaptureDoneMsg struct {
-	instanceID   string
-	content      string
-	err          error
-	scheduleNext bool
+	instanceID          string
+	selectionGeneration uint64
+	content             string
+	err                 error
+	scheduleNext        bool
 }
 
 type instanceChangedMsg struct{}
@@ -923,18 +971,20 @@ func (m *home) shouldSyncTerminalRefresh(selected *session.Instance) bool {
 		m.tabbedWindow.IsTerminalInScrollMode()
 }
 
-func (m *home) shouldApplyPreviewCapture(instanceID string) bool {
+func (m *home) shouldApplyPreviewCapture(instanceID string, generation uint64) bool {
 	selected := m.list.GetSelectedInstance()
 	return m.tabbedWindow.IsInPreviewTab() &&
 		selected != nil &&
-		selected.ID == instanceID
+		selected.ID == instanceID &&
+		m.livePaneGeneration == generation
 }
 
-func (m *home) shouldApplyTerminalCapture(instanceID string) bool {
+func (m *home) shouldApplyTerminalCapture(instanceID string, generation uint64) bool {
 	selected := m.list.GetSelectedInstance()
 	return m.tabbedWindow.IsInTerminalTab() &&
 		selected != nil &&
-		selected.ID == instanceID
+		selected.ID == instanceID &&
+		m.livePaneGeneration == generation
 }
 
 // instanceMetaResult holds the results of a single instance's metadata update,
