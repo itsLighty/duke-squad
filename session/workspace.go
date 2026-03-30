@@ -268,16 +268,16 @@ func (f *folderWorkspace) Setup() error {
 	if err := f.gitRun("init"); err != nil {
 		return err
 	}
-	if err := f.gitRun("config", "--local", "user.email", "claude-squad@local"); err != nil {
+	if err := f.gitRun("config", "--local", "user.email", "duke-squad@local"); err != nil {
 		return err
 	}
-	if err := f.gitRun("config", "--local", "user.name", "Claude Squad"); err != nil {
+	if err := f.gitRun("config", "--local", "user.name", "Duke Squad"); err != nil {
 		return err
 	}
 	if err := f.gitRun("add", "."); err != nil {
 		return err
 	}
-	if err := f.gitRun("commit", "--allow-empty", "-m", "claude-squad baseline"); err != nil {
+	if err := f.gitRun("commit", "--allow-empty", "-m", "duke-squad baseline"); err != nil {
 		return err
 	}
 
@@ -450,16 +450,16 @@ func (f *remoteFolderWorkspace) Setup() error {
 	if err := f.gitRun("init"); err != nil {
 		return err
 	}
-	if err := f.gitRun("config", "--local", "user.email", "claude-squad@local"); err != nil {
+	if err := f.gitRun("config", "--local", "user.email", "duke-squad@local"); err != nil {
 		return err
 	}
-	if err := f.gitRun("config", "--local", "user.name", "Claude Squad"); err != nil {
+	if err := f.gitRun("config", "--local", "user.name", "Duke Squad"); err != nil {
 		return err
 	}
 	if err := f.gitRun("add", "."); err != nil {
 		return err
 	}
-	if err := f.gitRun("commit", "--allow-empty", "-m", "claude-squad baseline"); err != nil {
+	if err := f.gitRun("commit", "--allow-empty", "-m", "duke-squad baseline"); err != nil {
 		return err
 	}
 
@@ -610,7 +610,7 @@ func newFolderWorkspaceWithTransportAndUser(projectTransport ProjectTransport, s
 
 func getManagedWorkspaceDirectory(projectTransport ProjectTransport) (string, error) {
 	if projectTransport == ProjectTransportSSH {
-		return "~/.claude-squad/managed-workspaces", nil
+		return "~/" + config.ConfigDirName[1:] + "/managed-workspaces", nil
 	}
 	configDir, err := config.GetConfigDir()
 	if err != nil {

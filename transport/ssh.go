@@ -13,7 +13,7 @@ import (
 	"github.com/creack/pty"
 )
 
-const sshKeychainServicePrefix = "claude-squad:ssh"
+const sshKeychainServicePrefix = "duke-squad:ssh"
 const sshAskPassScript = `#!/bin/sh
 prompt="${1:-}"
 case "$prompt" in
@@ -22,12 +22,12 @@ case "$prompt" in
     exit 0
     ;;
 esac
-if [ -n "${CLAUDE_SQUAD_SSH_PASSWORD:-}" ]; then
-  printf '%s\n' "$CLAUDE_SQUAD_SSH_PASSWORD"
+if [ -n "${DUKE_SQUAD_SSH_PASSWORD:-}" ]; then
+  printf '%s\n' "$DUKE_SQUAD_SSH_PASSWORD"
   exit 0
 fi
-if [ -n "${CLAUDE_SQUAD_SSH_KEYCHAIN_SERVICE:-}" ] && [ -n "${CLAUDE_SQUAD_SSH_KEYCHAIN_ACCOUNT:-}" ] && command -v security >/dev/null 2>&1; then
-  security find-generic-password -s "$CLAUDE_SQUAD_SSH_KEYCHAIN_SERVICE" -a "$CLAUDE_SQUAD_SSH_KEYCHAIN_ACCOUNT" -w
+if [ -n "${DUKE_SQUAD_SSH_KEYCHAIN_SERVICE:-}" ] && [ -n "${DUKE_SQUAD_SSH_KEYCHAIN_ACCOUNT:-}" ] && command -v security >/dev/null 2>&1; then
+  security find-generic-password -s "$DUKE_SQUAD_SSH_KEYCHAIN_SERVICE" -a "$DUKE_SQUAD_SSH_KEYCHAIN_ACCOUNT" -w
   exit $?
 fi
 exit 1
@@ -161,7 +161,7 @@ func DefaultSSHManager() *SSHManager {
 	defaultSSHManagerOnce.Do(func() {
 		configDir, err := config.GetConfigDir()
 		if err != nil {
-			configDir = filepath.Join(os.TempDir(), "claude-squad")
+			configDir = filepath.Join(os.TempDir(), config.BinaryName)
 		}
 		defaultSSHManager = &SSHManager{
 			socketDir: filepath.Join(configDir, "ssh"),
@@ -249,14 +249,14 @@ func (m *SSHManager) authEnv(cfg SSHConfig) []string {
 	}
 
 	env := []string{
-		"DISPLAY=claude-squad:0",
+		"DISPLAY=duke-squad:0",
 		"SSH_ASKPASS=" + m.askpass,
 		"SSH_ASKPASS_REQUIRE=force",
-		"CLAUDE_SQUAD_SSH_KEYCHAIN_SERVICE=" + cfg.KeychainService(),
-		"CLAUDE_SQUAD_SSH_KEYCHAIN_ACCOUNT=" + cfg.KeychainAccount(),
+		"DUKE_SQUAD_SSH_KEYCHAIN_SERVICE=" + cfg.KeychainService(),
+		"DUKE_SQUAD_SSH_KEYCHAIN_ACCOUNT=" + cfg.KeychainAccount(),
 	}
 	if password := cfg.Password; password != "" {
-		env = append(env, "CLAUDE_SQUAD_SSH_PASSWORD="+password)
+		env = append(env, "DUKE_SQUAD_SSH_PASSWORD="+password)
 	}
 	return env
 }

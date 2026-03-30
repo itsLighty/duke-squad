@@ -24,7 +24,10 @@ func GetConfigDir() (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("failed to get config home directory: %w", err)
 	}
-	return filepath.Join(homeDir, ".claude-squad"), nil
+	if err := ensureConfigDirMigrated(homeDir); err != nil {
+		return "", err
+	}
+	return getConfigDirForHome(homeDir), nil
 }
 
 // Profile represents a named program configuration

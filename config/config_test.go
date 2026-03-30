@@ -150,7 +150,7 @@ func TestGetConfigDir(t *testing.T) {
 
 		assert.NoError(t, err)
 		assert.NotEmpty(t, configDir)
-		assert.True(t, strings.HasSuffix(configDir, ".claude-squad"))
+		assert.True(t, strings.HasSuffix(configDir, ".duke-squad"))
 
 		// Verify it's an absolute path
 		assert.True(t, filepath.IsAbs(configDir))
@@ -177,7 +177,7 @@ func TestLoadConfig(t *testing.T) {
 	t.Run("loads valid config file", func(t *testing.T) {
 		// Create a temporary config directory
 		tempHome := t.TempDir()
-		configDir := filepath.Join(tempHome, ".claude-squad")
+		configDir := filepath.Join(tempHome, ConfigDirName)
 		err := os.MkdirAll(configDir, 0755)
 		require.NoError(t, err)
 
@@ -206,10 +206,45 @@ func TestLoadConfig(t *testing.T) {
 		assert.Equal(t, "test/", config.BranchPrefix)
 	})
 
+	t.Run("migrates legacy claude squad config into duke squad directory", func(t *testing.T) {
+		tempHome := t.TempDir()
+		legacyConfigDir := filepath.Join(tempHome, ".claude-squad")
+		err := os.MkdirAll(legacyConfigDir, 0755)
+		require.NoError(t, err)
+
+		legacyConfigPath := filepath.Join(legacyConfigDir, ConfigFileName)
+		legacyConfig := `{
+			"default_program": "codex",
+			"auto_yes": false,
+			"daemon_poll_interval": 3000,
+			"branch_prefix": "duke/"
+		}`
+		err = os.WriteFile(legacyConfigPath, []byte(legacyConfig), 0644)
+		require.NoError(t, err)
+
+		originalHome := os.Getenv("HOME")
+		os.Setenv("HOME", tempHome)
+		defer os.Setenv("HOME", originalHome)
+
+		cfg := LoadConfig()
+
+		require.Equal(t, "codex", cfg.DefaultProgram)
+		require.False(t, cfg.AutoYes)
+		require.Equal(t, 3000, cfg.DaemonPollInterval)
+		require.Equal(t, "duke/", cfg.BranchPrefix)
+
+		newConfigPath := filepath.Join(tempHome, ".duke-squad", ConfigFileName)
+		assert.FileExists(t, newConfigPath)
+
+		migrated, err := os.ReadFile(newConfigPath)
+		require.NoError(t, err)
+		assert.JSONEq(t, legacyConfig, string(migrated))
+	})
+
 	t.Run("returns default config on invalid JSON", func(t *testing.T) {
 		// Create a temporary config directory
 		tempHome := t.TempDir()
-		configDir := filepath.Join(tempHome, ".claude-squad")
+		configDir := filepath.Join(tempHome, ConfigDirName)
 		err := os.MkdirAll(configDir, 0755)
 		require.NoError(t, err)
 
@@ -322,7 +357,7 @@ func TestSaveConfig(t *testing.T) {
 		assert.NoError(t, err)
 
 		// Verify the file was created
-		configDir := filepath.Join(tempHome, ".claude-squad")
+		configDir := filepath.Join(tempHome, ConfigDirName)
 		configPath := filepath.Join(configDir, ConfigFileName)
 
 		assert.FileExists(t, configPath)

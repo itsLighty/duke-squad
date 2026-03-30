@@ -1,15 +1,15 @@
-# Claude Squad [![CI](https://github.com/smtg-ai/claude-squad/actions/workflows/build.yml/badge.svg)](https://github.com/smtg-ai/claude-squad/actions/workflows/build.yml) [![GitHub Release](https://img.shields.io/github/v/release/smtg-ai/claude-squad)](https://github.com/smtg-ai/claude-squad/releases/latest)
+# Duke Squad [![CI](https://github.com/itsLighty/duke-squad/actions/workflows/build.yml/badge.svg)](https://github.com/itsLighty/duke-squad/actions/workflows/build.yml) [![GitHub Release](https://img.shields.io/github/v/release/itsLighty/duke-squad)](https://github.com/itsLighty/duke-squad/releases/latest)
 
-[Claude Squad](https://smtg-ai.github.io/claude-squad/) is a terminal app that manages multiple [Claude Code](https://github.com/anthropics/claude-code), [Codex](https://github.com/openai/codex), [Gemini](https://github.com/google-gemini/gemini-cli) (and other local agents including [Aider](https://github.com/Aider-AI/aider)) in separate workspaces, allowing you to work on multiple tasks simultaneously.
+[Duke Squad](https://github.com/itsLighty/duke-squad) is a terminal app that manages multiple AI coding agents in parallel across local folders and remote SSH projects.
 
-
-![Claude Squad Screenshot](assets/screenshot.png)
+![Duke Squad Screenshot](assets/screenshot.png)
 
 ### Highlights
-- Complete tasks in the background (including yolo / auto-accept mode!)
-- Manage instances and tasks in one terminal window
-- Review changes before applying them, checkout changes before pushing them
-- Each task gets its own isolated git workspace, so no conflicts
+
+- Manage local folders and SSH-backed projects in one TUI
+- Run Claude Code, Codex, Gemini, Aider, and similar agents side-by-side
+- Isolate Git work with worktrees and folder work with managed snapshots
+- Review preview, diff, and terminal panes before pushing changes
 
 <br />
 
@@ -19,29 +19,23 @@ https://github.com/user-attachments/assets/aef18253-e58f-4525-9032-f5a3d66c975a
 
 ### Installation
 
-Both Homebrew and manual installation will install Claude Squad as `cs` on your system.
-
-#### Homebrew
+#### Shell Script
 
 ```bash
-brew install claude-squad
-ln -s "$(brew --prefix)/bin/claude-squad" "$(brew --prefix)/bin/cs"
+curl -fsSL https://raw.githubusercontent.com/itsLighty/duke-squad/main/install.sh | bash
 ```
 
-#### Manual
+This installs the canonical `duke-squad` binary and a `ds` shortcut into `~/.local/bin`.
 
-Claude Squad can also be installed by running the following command:
+If upstream `cs` is already installed, the installer leaves it alone and warns that the fork should be launched with `duke-squad` or `ds`.
 
-```bash
-curl -fsSL https://raw.githubusercontent.com/smtg-ai/claude-squad/main/install.sh | bash
-```
-
-This puts the `cs` binary in `~/.local/bin`.
-
-To use a custom name for the binary:
+#### Local Build
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/smtg-ai/claude-squad/main/install.sh | bash -s -- --name <your-binary-name>
+go build -o build/duke-squad .
+mkdir -p ~/.local/bin
+ln -sfn "$PWD/build/duke-squad" ~/.local/bin/duke-squad
+ln -sfn "$PWD/build/duke-squad" ~/.local/bin/ds
 ```
 
 ### Prerequisites
@@ -51,75 +45,74 @@ curl -fsSL https://raw.githubusercontent.com/smtg-ai/claude-squad/main/install.s
 
 ### Usage
 
-```
+```text
 Usage:
-  cs [flags]
-  cs [command]
+  duke-squad [flags]
+  duke-squad [command]
 
 Available Commands:
   completion  Generate the autocompletion script for the specified shell
   debug       Print debug information like config paths
   help        Help about any command
   reset       Reset all stored instances
-  version     Print the version number of claude-squad
+  version     Print the version number of duke-squad
 
 Flags:
-  -y, --autoyes          [experimental] If enabled, all instances will automatically accept prompts for claude code & aider
-  -h, --help             help for claude-squad
+  -y, --autoyes          [experimental] If enabled, all instances will automatically accept prompts
+  -h, --help             help for duke-squad
   -p, --program string   Preselected provider/program for new sessions in this run (e.g. 'codex')
 ```
 
 Run the application with:
 
 ```bash
-cs
+ds
 ```
-NOTE: The default program is `claude` and we recommend using the latest version.
 
-<br />
+`duke-squad` works as the full command if you prefer the canonical binary name.
 
-<b>Using Claude Squad with other AI assistants:</b>
-- For [Codex](https://github.com/openai/codex): Set your API key with `export OPENAI_API_KEY=<your_key>`
-- Launch with specific assistants:
-   - Codex: `cs -p "codex"` (preselects Codex when creating new sessions)
-   - Aider: `cs -p "aider ..."`
-   - Gemini: `cs -p "gemini"`
-- Make multiple providers available in the new-session picker by configuring profiles
-- Make one of them the default by modifying the config file (locate with `cs debug`)
+### Adding Projects
 
-<br />
+Press `a` to open the add-project flow.
 
-#### Menu
-The menu at the bottom of the screen shows available commands: 
+#### Local
 
-##### Instance/Session Management
-- `n` - Create a new session
-- `N` - Create a new session with a prompt
-- `D` - Kill (delete) the selected session
-- `↑/j`, `↓/k` - Navigate between sessions
+- Leave the source picker on `Local`
+- Enter the project folder path
+- Duke Squad classifies the folder as Git-backed or plain-folder automatically
 
-##### Actions
-- `↵/o` - Attach to the selected session to reprompt
-- `ctrl-q` - Detach from session
-- `s` - Commit and push branch to github
-- `c` - Checkout. Commits changes and pauses the session
-- `r` - Resume a paused session
-- `?` - Show help menu
+#### Remote SSH
 
-##### Navigation
-- `tab` - Switch between preview tab and diff tab
-- `q` - Quit the application
-- `shift-↓/↑` - scroll in diff view
+- Switch the source picker to `Remote`
+- Fill in `Project name` if you want a custom label
+- Enter `SSH username`
+- Enter `Host / IP`
+- Enter `Password` only if key-based auth is not already configured
+- Enter `Remote folder`
+
+If the remote folder is a Git repository, Duke Squad creates remote worktrees. If it is a plain folder, Duke Squad creates a managed snapshot workspace on the remote host.
+
+### Using Other Agents
+
+- Codex: `ds -p "codex"`
+- Aider: `ds -p "aider ..."`
+- Gemini: `ds -p "gemini"`
+
+Profiles in the config file let you expose multiple agent presets in the new-session picker and choose a default.
 
 ### Configuration
 
-Claude Squad stores its configuration in `~/.claude-squad/config.json`. You can find the exact path by running `cs debug`.
+Duke Squad stores configuration in `~/.duke-squad/config.json`.
+
+On first launch, if `~/.duke-squad` does not exist but `~/.claude-squad` does, Duke Squad copies:
+
+- `config.json`
+- `state.json`
+- `instances.json`
+
+This preserves existing local state without moving old worktree or managed-workspace directories.
 
 #### Profiles
-
-Profiles let you define multiple named program configurations and switch between them when creating any new session. When more than one profile is defined, both `n` and `N` show a provider picker that you can navigate with `←`/`→`.
-
-To configure profiles, add a `profiles` array to your config file and set `default_program` to the name of the profile to select by default:
 
 ```json
 {
@@ -127,41 +120,22 @@ To configure profiles, add a `profiles` array to your config file and set `defau
   "profiles": [
     { "name": "claude", "program": "claude" },
     { "name": "codex", "program": "codex" },
-    { "name": "aider", "program": "aider --model ollama_chat/gemma3:1b" }
+    { "name": "gemini", "program": "gemini" }
   ]
 }
 ```
 
-Each profile has two fields:
-
-| Field     | Description                                              |
-|-----------|----------------------------------------------------------|
-| `name`    | Display name shown in the profile picker                 |
-| `program` | Shell command used to launch the agent for that profile  |
-
-If no profiles are defined, Claude Squad uses `default_program` directly as the launch command (the default is `claude`).
-
 #### Auto-Yes
 
-Newly created configs default `auto_yes` to `true`. Existing configs are left unchanged. To opt out, set `"auto_yes": false` in your config file.
-
-### FAQs
-
-#### Failed to start new session
-
-If you get an error like `failed to start new session: timed out waiting for tmux session`, update the
-underlying program (ex. `claude`) to the latest version.
+New configs default `auto_yes` to `true`. Set `"auto_yes": false` to opt out.
 
 ### How It Works
 
-1. **tmux** to create isolated terminal sessions for each agent
-2. **git worktrees** to isolate codebases so each session works on its own branch
-3. A simple TUI interface for easy navigation and management
+1. `tmux` creates isolated terminal sessions for each agent.
+2. Git projects use worktrees so each session gets its own branch and workspace.
+3. Folder projects use managed snapshots so agents can work without mutating the source folder directly.
+4. SSH projects reuse the same model across remote runners.
 
 ### License
 
 [AGPL-3.0](LICENSE.md)
-
-### Star History
-
-[![Star History Chart](https://api.star-history.com/svg?repos=smtg-ai/claude-squad&type=Date)](https://www.star-history.com/#smtg-ai/claude-squad&Date)

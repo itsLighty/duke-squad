@@ -18,13 +18,13 @@ import (
 )
 
 var (
-	version     = "1.0.17"
+	version     = "1.0.18"
 	programFlag string
 	autoYesFlag bool
 	daemonFlag  bool
 	rootCmd     = &cobra.Command{
-		Use:   "claude-squad",
-		Short: "Claude Squad - Manage multiple AI agents like Claude Code, Aider, Codex, and Amp.",
+		Use:   config.BinaryName,
+		Short: config.AppName + " - Manage multiple AI agents like Claude Code, Aider, Codex, and Amp.",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx := context.Background()
 			log.Initialize(daemonFlag)
@@ -130,10 +130,10 @@ var (
 
 	versionCmd = &cobra.Command{
 		Use:   "version",
-		Short: "Print the version number of claude-squad",
+		Short: "Print the version number of " + config.BinaryName,
 		Run: func(cmd *cobra.Command, args []string) {
-			fmt.Printf("claude-squad version %s\n", version)
-			fmt.Printf("https://github.com/smtg-ai/claude-squad/releases/tag/v%s\n", version)
+			fmt.Printf("%s version %s\n", config.BinaryName, version)
+			fmt.Printf("https://github.com/%s/releases/tag/v%s\n", config.ReleaseRepository, version)
 		},
 	}
 )

@@ -1,6 +1,7 @@
 package app
 
 import (
+	"claude-squad/config"
 	"claude-squad/log"
 	"claude-squad/session"
 	"claude-squad/ui"
@@ -35,7 +36,7 @@ func helpStart(instance *session.Instance) helpText {
 
 func (h helpTypeGeneral) toContent() string {
 	content := lipgloss.JoinVertical(lipgloss.Left,
-		titleStyle.Render("Claude Squad"),
+		titleStyle.Render(config.AppName),
 		"",
 		"A terminal UI that manages multiple agents across grouped local and SSH projects.",
 		"",

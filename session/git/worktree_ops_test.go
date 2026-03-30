@@ -103,3 +103,13 @@ func TestGitWorktreeExistsReturnsRunnerErrorForRemoteChecks(t *testing.T) {
 	require.False(t, exists)
 	require.ErrorContains(t, err, "permission denied")
 }
+
+func TestGetWorktreeDirectoryUsesDukeSquadConfigDir(t *testing.T) {
+	homeDir := t.TempDir()
+	t.Setenv("HOME", homeDir)
+
+	worktreeDir, err := getWorktreeDirectory()
+
+	require.NoError(t, err)
+	require.Equal(t, filepath.Join(homeDir, ".duke-squad", "worktrees"), worktreeDir)
+}
