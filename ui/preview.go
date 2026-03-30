@@ -49,6 +49,18 @@ func (p *PreviewPane) setFallbackState(message string) {
 	}
 }
 
+func (p *PreviewPane) setScrollViewportContent(content string) {
+	wasAtBottom := p.viewport.AtBottom()
+	offset := p.viewport.YOffset
+
+	p.viewport.SetContent(content)
+	if wasAtBottom {
+		p.viewport.GotoBottom()
+		return
+	}
+	p.viewport.SetYOffset(offset)
+}
+
 // Updates the preview pane content with the tmux pane content
 func (p *PreviewPane) UpdateContent(project *session.Project, instance *session.Instance) error {
 	switch {
@@ -93,37 +105,31 @@ func (p *PreviewPane) UpdateContent(project *session.Project, instance *session.
 	var content string
 	var err error
 
-	// If in scroll mode but haven't captured content yet, do it now
-	if p.isScrolling && p.viewport.Height > 0 && len(p.viewport.View()) == 0 {
-		// Capture full pane content including scrollback history using capture-pane -p -S -
+	if p.isScrolling {
+		// Keep the scrolled preview live instead of freezing it.
 		content, err = instance.PreviewFullHistory()
 		if err != nil {
 			return err
 		}
+		p.setScrollViewportContent(content)
+		return nil
+	}
 
-		// Set content in the viewport
-		footer := lipgloss.NewStyle().
-			Foreground(lipgloss.AdaptiveColor{Light: "#808080", Dark: "#808080"}).
-			Render("ESC to exit scroll mode")
+	// In normal mode, use the usual preview
+	content, err = instance.Preview()
+	if err != nil {
+		return err
+	}
 
-		p.viewport.SetContent(lipgloss.JoinVertical(lipgloss.Left, content, footer))
-	} else if !p.isScrolling {
-		// In normal mode, use the usual preview
-		content, err = instance.Preview()
-		if err != nil {
-			return err
-		}
-
-		// Always update the preview state with content, even if empty
-		// This ensures that newly created instances will display their content immediately
-		if len(content) == 0 && !instance.Started() {
-			p.setFallbackState("Please enter a name for the instance.")
-		} else {
-			// Update the preview state with the current content
-			p.previewState = previewState{
-				fallback: false,
-				text:     content,
-			}
+	// Always update the preview state with content, even if empty
+	// This ensures that newly created instances will display their content immediately
+	if len(content) == 0 && !instance.Started() {
+		p.setFallbackState("Please enter a name for the instance.")
+	} else {
+		// Update the preview state with the current content
+		p.previewState = previewState{
+			fallback: false,
+			text:     content,
 		}
 	}
 
@@ -216,20 +222,12 @@ func (p *PreviewPane) ScrollUp(instance *session.Instance) error {
 		if err != nil {
 			return err
 		}
-
-		// Set content in the viewport
-		footer := lipgloss.NewStyle().
-			Foreground(lipgloss.AdaptiveColor{Light: "#808080", Dark: "#808080"}).
-			Render("ESC to exit scroll mode")
-
-		contentWithFooter := lipgloss.JoinVertical(lipgloss.Left, content, footer)
-		p.viewport.SetContent(contentWithFooter)
+		p.viewport.SetContent(content)
 
 		// Position the viewport at the bottom initially
 		p.viewport.GotoBottom()
 
 		p.isScrolling = true
-		return nil
 	}
 
 	// Already in scroll mode, just scroll the viewport
@@ -249,14 +247,7 @@ func (p *PreviewPane) ScrollDown(instance *session.Instance) error {
 		if err != nil {
 			return err
 		}
-
-		// Set content in the viewport
-		footer := lipgloss.NewStyle().
-			Foreground(lipgloss.AdaptiveColor{Light: "#808080", Dark: "#808080"}).
-			Render("ESC to exit scroll mode")
-
-		contentWithFooter := lipgloss.JoinVertical(lipgloss.Left, content, footer)
-		p.viewport.SetContent(contentWithFooter)
+		p.viewport.SetContent(content)
 
 		// Position the viewport at the bottom initially
 		p.viewport.GotoBottom()

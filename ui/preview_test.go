@@ -445,6 +445,56 @@ func TestSetPreviewContentDoesNothingWhileScrolling(t *testing.T) {
 	require.Equal(t, "existing preview", previewPane.previewState.text)
 }
 
+func TestPreviewUpdateContentRefreshesWhileScrolling(t *testing.T) {
+	sessionCreated := false
+	fullContent := "$ initial\nline 1\nline 2"
+
+	cmdExec := cmd_test.MockCmdExec{
+		RunFunc: func(cmd *exec.Cmd) error {
+			cmdStr := cmd.String()
+			if strings.Contains(cmdStr, "has-session") {
+				if sessionCreated {
+					return nil
+				}
+				return fmt.Errorf("session does not exist")
+			}
+			if strings.Contains(cmdStr, "new-session") {
+				sessionCreated = true
+				return nil
+			}
+			return nil
+		},
+		OutputFunc: func(cmd *exec.Cmd) ([]byte, error) {
+			cmdStr := cmd.String()
+			if !strings.Contains(cmdStr, "capture-pane") {
+				return []byte(""), nil
+			}
+			if strings.Contains(cmdStr, "-S -") {
+				return []byte(fullContent), nil
+			}
+			return []byte("visible"), nil
+		},
+	}
+
+	setup := setupTestEnvironment(t, cmdExec)
+	defer setup.cleanupFn()
+
+	previewPane := NewPreviewPane()
+	previewPane.SetSize(80, 10)
+
+	err := previewPane.ScrollUp(setup.instance)
+	require.NoError(t, err)
+	require.True(t, previewPane.isScrolling)
+	require.Contains(t, previewPane.viewport.View(), "line 1")
+
+	fullContent = "$ updated\nline 1\nline 2\nline 3"
+
+	err = previewPane.UpdateContent(nil, setup.instance)
+	require.NoError(t, err)
+	require.Contains(t, previewPane.viewport.View(), "$ updated")
+	require.Contains(t, previewPane.viewport.View(), "line 3")
+}
+
 // Helper function for max
 func max(a, b int) int {
 	if a > b {
