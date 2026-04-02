@@ -48,6 +48,8 @@ type WorkspaceData struct {
 	IsExistingBranch bool             `json:"is_existing_branch,omitempty"`
 }
 
+var generateBranchMetadata = git.GenerateBranchMetadata
+
 type gitWorkspace struct {
 	worktree *git.GitWorktree
 }
@@ -149,7 +151,7 @@ func newGitWorkspace(projectTransport ProjectTransport, sshTarget string, sshUse
 		return &gitWorkspace{worktree: worktree}, selectedBranch, "", nil
 	}
 
-	branchMetadata := git.GenerateBranchMetadata(rootPath, projectBaseName(projectTransport, rootPath), title, prompt)
+	branchMetadata := generateBranchMetadata(rootPath, projectBaseName(projectTransport, rootPath), title, prompt)
 	worktree, err := git.NewGitWorktreeFromGeneratedBranchWithRunner(runner, rootPath, branchMetadata.BranchName, handleName)
 	if err != nil {
 		return nil, "", "", err

@@ -1,6 +1,7 @@
 package session
 
 import (
+	"claude-squad/session/git"
 	"claude-squad/transport"
 	"fmt"
 	"os"
@@ -8,13 +9,9 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
-	_ "unsafe"
 
 	"github.com/stretchr/testify/require"
 )
-
-//go:linkname runBranchMetadataGenerator claude-squad/session/git.runBranchMetadataGenerator
-var runBranchMetadataGenerator func(repoPath, repoName, title, prompt string) (string, error)
 
 type stubRunner struct {
 	combinedOutput func(spec transport.CommandSpec) ([]byte, error)
@@ -121,16 +118,19 @@ func TestNewGitWorkspaceUsesGeneratedMetadataForNewBranches(t *testing.T) {
 	var gotRepoName string
 	var gotTitle string
 	var gotPrompt string
-	original := runBranchMetadataGenerator
-	runBranchMetadataGenerator = func(repoPath, repoName, title, prompt string) (string, error) {
+	original := generateBranchMetadata
+	generateBranchMetadata = func(repoPath, repoName, title, prompt string) git.BranchMetadata {
 		gotRepoPath = repoPath
 		gotRepoName = repoName
 		gotTitle = title
 		gotPrompt = prompt
-		return `{"slug":"dev/generated-branch","description":"Draft branch metadata"}`, nil
+		return git.BranchMetadata{
+			BranchName:  "dev/generated-branch",
+			Description: "Draft branch metadata",
+		}
 	}
 	t.Cleanup(func() {
-		runBranchMetadataGenerator = original
+		generateBranchMetadata = original
 	})
 
 	workspace, branchName, branchDescription, err := createWorkspace(
@@ -174,13 +174,16 @@ func TestNewGitWorkspaceSkipsMetadataForExistingBranch(t *testing.T) {
 	runGit(t, repoDir, "checkout", originalBranch)
 
 	called := false
-	original := runBranchMetadataGenerator
-	runBranchMetadataGenerator = func(repoPath, repoName, title, prompt string) (string, error) {
+	original := generateBranchMetadata
+	generateBranchMetadata = func(repoPath, repoName, title, prompt string) git.BranchMetadata {
 		called = true
-		return `{"slug":"dev/should-not-be-used","description":"Should not be generated"}`, nil
+		return git.BranchMetadata{
+			BranchName:  "dev/should-not-be-used",
+			Description: "Should not be generated",
+		}
 	}
 	t.Cleanup(func() {
-		runBranchMetadataGenerator = original
+		generateBranchMetadata = original
 	})
 
 	workspace, branchName, branchDescription, err := createWorkspace(
