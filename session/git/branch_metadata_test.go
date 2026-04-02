@@ -158,6 +158,24 @@ func TestGenerateBranchMetadata(t *testing.T) {
 			Description: "Launch feature",
 		}, got)
 	})
+
+	t.Run("falls back to repo name when title cannot be slugged", func(t *testing.T) {
+		original := runBranchMetadataGenerator
+		t.Cleanup(func() {
+			runBranchMetadataGenerator = original
+		})
+
+		runBranchMetadataGenerator = func(repoPath, repoName, title, prompt string) (string, error) {
+			return "", errors.New("codex unavailable")
+		}
+
+		got := GenerateBranchMetadata("/tmp/repo", "project-x", "!!!", "Explain the change")
+
+		assert.Equal(t, BranchMetadata{
+			BranchName:  "dev/project-x",
+			Description: "!!!",
+		}, got)
+	})
 }
 
 func TestGenerateBranchMetadataFallbackLogging(t *testing.T) {

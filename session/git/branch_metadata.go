@@ -181,20 +181,24 @@ Choose a short human-readable description.
 }
 
 func localBranchMetadata(repoName, title string) BranchMetadata {
-	branchSource := strings.TrimSpace(title)
-	if branchSource == "" {
-		branchSource = strings.TrimSpace(repoName)
-	}
-
-	branchName := normalizeGeneratedBranchSlug(branchSource)
-	if branchName == "" {
-		branchName = "dev/branch"
-	}
+	branchName := bestFallbackBranchSlug(repoName, title)
 
 	return BranchMetadata{
 		BranchName:  branchName,
 		Description: normalizeBranchDescription(title),
 	}
+}
+
+func bestFallbackBranchSlug(repoName, title string) string {
+	if branchName := normalizeGeneratedBranchSlug(title); branchName != "" {
+		return branchName
+	}
+
+	if branchName := normalizeGeneratedBranchSlug(repoName); branchName != "" {
+		return branchName
+	}
+
+	return "dev/branch"
 }
 
 func normalizeGeneratedBranchSlug(raw string) string {
