@@ -2,6 +2,10 @@ package git
 
 import (
 	"errors"
+	"fmt"
+	"os"
+	"path/filepath"
+	"runtime"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -54,12 +58,12 @@ func TestGenerateBranchMetadata(t *testing.T) {
 		runBranchMetadataGenerator = func(repoPath, repoName, title, prompt string) (string, error) {
 			require.Equal(t, "/tmp/repo", repoPath)
 			require.Equal(t, "project-x", repoName)
-			require.Equal(t, "Launch feature", title)
+			require.Equal(t, "Different title", title)
 			require.Equal(t, "Explain the change", prompt)
-			return `{"branch_name":"feature/Launch   Feature!!","description":"  Ship\n  the   feature  quickly "}`, nil
+			return `{"slug":"feature/Launch   Feature!!","description":"  Ship\n  the   feature  quickly "}`, nil
 		}
 
-		got := GenerateBranchMetadata("/tmp/repo", "project-x", "Launch feature", "Explain the change")
+		got := GenerateBranchMetadata("/tmp/repo", "project-x", "Different title", "Explain the change")
 
 		assert.Equal(t, BranchMetadata{
 			BranchName:  "dev/launch-feature",
@@ -84,4 +88,88 @@ func TestGenerateBranchMetadata(t *testing.T) {
 			Description: "Launch feature",
 		}, got)
 	})
+}
+
+func TestRunCodexBranchMetadataGenerator(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell script fixture is POSIX-specific")
+	}
+
+	tempDir := t.TempDir()
+	repoPath := filepath.Join(tempDir, "repo")
+	require.NoError(t, os.MkdirAll(repoPath, 0o755))
+
+	promptFile := filepath.Join(tempDir, "prompt.txt")
+	codexPath := filepath.Join(tempDir, "codex")
+
+	script := fmt.Sprintf(`#!/bin/sh
+set -eu
+
+expected_repo=%q
+expected_model=gpt-5.4-mini
+expected_sandbox=read-only
+
+subcommand=""
+model=""
+sandbox=""
+repo_dir=""
+schema_path=""
+output_path=""
+skip_git_repo_check=""
+ephemeral=""
+
+while [ "$#" -gt 0 ]; do
+	case "$1" in
+		exec) subcommand="$1" ;;
+		--model) model="$2"; shift ;;
+		--sandbox) sandbox="$2"; shift ;;
+		--cd) repo_dir="$2"; shift ;;
+		--output-schema) schema_path="$2"; shift ;;
+		--output-last-message) output_path="$2"; shift ;;
+		--skip-git-repo-check) skip_git_repo_check=1 ;;
+		--ephemeral) ephemeral=1 ;;
+		-) ;;
+	esac
+	shift
+done
+
+[ "$subcommand" = "exec" ]
+[ "$model" = "$expected_model" ]
+[ "$sandbox" = "$expected_sandbox" ]
+[ "$repo_dir" = "$expected_repo" ]
+[ -n "$skip_git_repo_check" ]
+[ -n "$ephemeral" ]
+[ -f "$schema_path" ]
+[ -n "$output_path" ]
+
+grep -q '"slug"' "$schema_path"
+! grep -q 'branch_name' "$schema_path"
+grep -q '"description"' "$schema_path"
+
+cat > %q
+printf '{"slug":"feature/fake-branch","description":"  generated description  "}' > "$output_path"
+`, repoPath, promptFile)
+
+	require.NoError(t, os.WriteFile(codexPath, []byte(script), 0o755))
+
+	originalResolver := getCodexProgramCommand
+	t.Cleanup(func() {
+		getCodexProgramCommand = originalResolver
+	})
+	getCodexProgramCommand = func(name string) (string, error) {
+		require.Equal(t, "codex", name)
+		return codexPath, nil
+	}
+
+	raw, err := runCodexBranchMetadataGenerator(repoPath, "project-x", "Different title", "Explain the change")
+	require.NoError(t, err)
+	assert.JSONEq(t, `{"slug":"feature/fake-branch","description":"  generated description  "}`, raw)
+
+	promptBytes, err := os.ReadFile(promptFile)
+	require.NoError(t, err)
+	prompt := string(promptBytes)
+	assert.NotContains(t, prompt, repoPath)
+	assert.Contains(t, prompt, "project-x")
+	assert.Contains(t, prompt, "Different title")
+	assert.Contains(t, prompt, "Explain the change")
 }

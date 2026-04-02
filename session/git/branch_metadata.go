@@ -14,6 +14,11 @@ import (
 
 const codexBranchModel = "gpt-5.4-mini"
 
+type codexBranchMetadata struct {
+	Slug        string `json:"slug"`
+	Description string `json:"description"`
+}
+
 // BranchMetadata captures the AI-generated branch name and description for a task.
 type BranchMetadata struct {
 	BranchName  string `json:"branch_name"`
@@ -21,6 +26,7 @@ type BranchMetadata struct {
 }
 
 var runBranchMetadataGenerator = runCodexBranchMetadataGenerator
+var getCodexProgramCommand = config.GetProgramCommand
 
 // GenerateBranchMetadata asks Codex for branch metadata and falls back locally when Codex is unavailable.
 func GenerateBranchMetadata(repoPath, repoName, title, prompt string) BranchMetadata {
@@ -31,12 +37,12 @@ func GenerateBranchMetadata(repoPath, repoName, title, prompt string) BranchMeta
 		return fallback
 	}
 
-	var generated BranchMetadata
+	var generated codexBranchMetadata
 	if err := json.Unmarshal([]byte(raw), &generated); err != nil {
 		return fallback
 	}
 
-	branchName := normalizeGeneratedBranchSlug(generated.BranchName)
+	branchName := normalizeGeneratedBranchSlug(generated.Slug)
 	if branchName == "" {
 		branchName = fallback.BranchName
 	}
@@ -53,7 +59,7 @@ func GenerateBranchMetadata(repoPath, repoName, title, prompt string) BranchMeta
 }
 
 func runCodexBranchMetadataGenerator(repoPath, repoName, title, prompt string) (string, error) {
-	codexPath, err := config.GetProgramCommand("codex")
+	codexPath, err := getCodexProgramCommand("codex")
 	if err != nil {
 		return "", err
 	}
@@ -76,6 +82,7 @@ func runCodexBranchMetadataGenerator(repoPath, repoName, title, prompt string) (
 	cmd := exec.CommandContext(ctx, codexPath,
 		"exec",
 		"--model", codexBranchModel,
+		"--sandbox", "read-only",
 		"--cd", repoPath,
 		"--skip-git-repo-check",
 		"--output-schema", schemaPath,
@@ -83,7 +90,7 @@ func runCodexBranchMetadataGenerator(repoPath, repoName, title, prompt string) (
 		"--ephemeral",
 		"-",
 	)
-	cmd.Stdin = strings.NewReader(codexMetadataPrompt(repoPath, repoName, title, prompt))
+	cmd.Stdin = strings.NewReader(codexMetadataPrompt(repoName, title, prompt))
 
 	if output, err := cmd.CombinedOutput(); err != nil {
 		return "", fmt.Errorf("codex branch metadata generation failed: %w: %s", err, strings.TrimSpace(string(output)))
@@ -111,10 +118,10 @@ func writeCodexOutputSchema() (string, func(), error) {
 	schema := []byte(`{
   "type": "object",
   "properties": {
-    "branch_name": { "type": "string" },
+    "slug": { "type": "string" },
     "description": { "type": "string" }
   },
-  "required": ["branch_name", "description"],
+  "required": ["slug", "description"],
   "additionalProperties": false
 }`)
 	if _, err := file.Write(schema); err != nil {
@@ -147,10 +154,9 @@ func createCodexOutputFile() (string, func(), error) {
 	}, nil
 }
 
-func codexMetadataPrompt(repoPath, repoName, title, prompt string) string {
+func codexMetadataPrompt(repoName, title, prompt string) string {
 	return strings.TrimSpace(fmt.Sprintf(`Generate branch metadata for a coding task.
 
-Repository path: %s
 Repository name: %s
 Title: %s
 Prompt: %s
@@ -158,7 +164,7 @@ Prompt: %s
 Return only JSON that matches the schema.
 Choose a concise branch slug without any environment prefix.
 Choose a short human-readable description.
-`, repoPath, repoName, title, prompt))
+`, repoName, title, prompt))
 }
 
 func localBranchMetadata(repoName, title string) BranchMetadata {
