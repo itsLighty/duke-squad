@@ -70,10 +70,6 @@ func (h helpTypeInstanceStart) toContent() string {
 		refLine = descStyle.Render(fmt.Sprintf("• Git branch: %s",
 			lipgloss.NewStyle().Bold(true).Render(h.instance.Branch)))
 	}
-	branchSummaryLine := ""
-	if h.instance.BranchDescription != "" {
-		branchSummaryLine = descStyle.Render(fmt.Sprintf("• Branch summary: %s", h.instance.BranchDescription))
-	}
 
 	lines := []string{
 		titleStyle.Render("Instance Created"),
@@ -81,8 +77,8 @@ func (h helpTypeInstanceStart) toContent() string {
 		descStyle.Render("New session created:"),
 		refLine,
 	}
-	if branchSummaryLine != "" {
-		lines = append(lines, branchSummaryLine)
+	if h.instance.SupportsPush() && h.instance.BranchDescription != "" {
+		lines = append(lines, descStyle.Render(fmt.Sprintf("• Branch summary: %s", h.instance.BranchDescription)))
 	}
 	lines = append(lines,
 		workspaceLine,

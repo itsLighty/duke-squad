@@ -26,3 +26,14 @@ func TestInstanceStartHelpIncludesBranchDescription(t *testing.T) {
 	require.Contains(t, content, "Git branch: dev/keep-preview-live")
 	require.Contains(t, content, "Branch summary: Keep the preview pane updating while scrolled")
 }
+
+func TestInstanceStartHelpOmitsBranchDescriptionForNonGitInstances(t *testing.T) {
+	content := helpTypeInstanceStart{instance: &session.Instance{
+		Program:           "codex",
+		ProjectKind:       session.ProjectKindFolder,
+		BranchDescription: "Keep the preview pane updating while scrolled",
+	}}.toContent()
+
+	require.NotContains(t, content, "Branch summary: Keep the preview pane updating while scrolled")
+	require.Contains(t, content, "Managed workspace snapshot")
+}
