@@ -34,17 +34,18 @@ type Instance struct {
 	SSHUser          string
 	SSHHost          string
 
-	Title     string
-	Path      string
-	Branch    string
-	Status    Status
-	Program   string
-	Height    int
-	Width     int
-	CreatedAt time.Time
-	UpdatedAt time.Time
-	AutoYes   bool
-	Prompt    string
+	Title             string
+	Path              string
+	Branch            string
+	Status            Status
+	Program           string
+	Height            int
+	Width             int
+	CreatedAt         time.Time
+	UpdatedAt         time.Time
+	AutoYes           bool
+	Prompt            string
+	BranchDescription string
 
 	diffStats      *git.DiffStats
 	selectedBranch string
@@ -57,23 +58,24 @@ type Instance struct {
 
 func (i *Instance) ToInstanceData() InstanceData {
 	data := InstanceData{
-		ID:               i.ID,
-		ProjectID:        i.ProjectID,
-		ProjectKind:      i.ProjectKind,
-		ProjectTransport: i.ProjectTransport,
-		SSHTarget:        i.SSHTarget,
-		SSHUser:          i.SSHUser,
-		SSHHost:          i.SSHHost,
-		Title:            i.Title,
-		Path:             i.Path,
-		Branch:           i.Branch,
-		Status:           i.Status,
-		Height:           i.Height,
-		Width:            i.Width,
-		CreatedAt:        i.CreatedAt,
-		UpdatedAt:        time.Now(),
-		Program:          i.Program,
-		AutoYes:          i.AutoYes,
+		ID:                i.ID,
+		ProjectID:         i.ProjectID,
+		ProjectKind:       i.ProjectKind,
+		ProjectTransport:  i.ProjectTransport,
+		SSHTarget:         i.SSHTarget,
+		SSHUser:           i.SSHUser,
+		SSHHost:           i.SSHHost,
+		Title:             i.Title,
+		Path:              i.Path,
+		Branch:            i.Branch,
+		Status:            i.Status,
+		Height:            i.Height,
+		Width:             i.Width,
+		CreatedAt:         i.CreatedAt,
+		UpdatedAt:         time.Now(),
+		Program:           i.Program,
+		AutoYes:           i.AutoYes,
+		BranchDescription: i.BranchDescription,
 	}
 
 	if i.workspace != nil {
@@ -143,24 +145,25 @@ func FromInstanceData(data InstanceData) (*Instance, error) {
 	}
 
 	instance := &Instance{
-		ID:               data.ID,
-		ProjectID:        data.ProjectID,
-		ProjectKind:      data.ProjectKind,
-		ProjectTransport: data.ProjectTransport,
-		SSHTarget:        data.SSHTarget,
-		SSHUser:          data.SSHUser,
-		SSHHost:          data.SSHHost,
-		Title:            data.Title,
-		Path:             data.Path,
-		Branch:           data.Branch,
-		Status:           data.Status,
-		Height:           data.Height,
-		Width:            data.Width,
-		CreatedAt:        data.CreatedAt,
-		UpdatedAt:        data.UpdatedAt,
-		Program:          config.NormalizeProgramCommand(data.Program),
-		AutoYes:          data.AutoYes,
-		workspace:        workspace,
+		ID:                data.ID,
+		ProjectID:         data.ProjectID,
+		ProjectKind:       data.ProjectKind,
+		ProjectTransport:  data.ProjectTransport,
+		SSHTarget:         data.SSHTarget,
+		SSHUser:           data.SSHUser,
+		SSHHost:           data.SSHHost,
+		Title:             data.Title,
+		Path:              data.Path,
+		Branch:            data.Branch,
+		Status:            data.Status,
+		Height:            data.Height,
+		Width:             data.Width,
+		CreatedAt:         data.CreatedAt,
+		UpdatedAt:         data.UpdatedAt,
+		Program:           config.NormalizeProgramCommand(data.Program),
+		AutoYes:           data.AutoYes,
+		BranchDescription: data.BranchDescription,
+		workspace:         workspace,
 		diffStats: &git.DiffStats{
 			Added:   data.DiffStats.Added,
 			Removed: data.DiffStats.Removed,
@@ -285,12 +288,13 @@ func (i *Instance) Start(firstTimeSetup bool) error {
 	}
 
 	if firstTimeSetup {
-		workspace, branchName, err := createWorkspace(i.ProjectTransport, i.SSHTarget, i.SSHUser, i.SSHHost, i.ProjectKind, i.Path, i.ID, i.Title, i.selectedBranch)
+		workspace, branchName, branchDescription, err := createWorkspace(i.ProjectTransport, i.SSHTarget, i.SSHUser, i.SSHHost, i.ProjectKind, i.Path, i.ID, i.Title, i.Prompt, i.selectedBranch)
 		if err != nil {
 			return err
 		}
 		i.workspace = workspace
 		i.Branch = branchName
+		i.BranchDescription = branchDescription
 	}
 
 	var setupErr error

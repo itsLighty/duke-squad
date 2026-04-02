@@ -136,6 +136,28 @@ func NewGitWorktreeFromBranchWithRunner(runner transport.Runner, repoPath string
 	}, nil
 }
 
+// NewGitWorktreeFromGeneratedBranchWithRunner creates a worktree for a newly generated branch.
+// The branch is created during Setup, so it must not be marked as pre-existing.
+func NewGitWorktreeFromGeneratedBranchWithRunner(runner transport.Runner, repoPath string, branchName string, sessionName string) (*GitWorktree, error) {
+	repoPath, worktreePath, err := resolveWorktreePaths(runner, repoPath, branchName)
+	if err != nil {
+		return nil, err
+	}
+
+	return &GitWorktree{
+		runner:       runner,
+		repoPath:     repoPath,
+		sessionName:  sessionName,
+		branchName:   branchName,
+		worktreePath: worktreePath,
+	}, nil
+}
+
+// NewGitWorktreeFromGeneratedBranch creates a worktree for a newly generated branch.
+func NewGitWorktreeFromGeneratedBranch(repoPath string, branchName string, sessionName string) (*GitWorktree, error) {
+	return NewGitWorktreeFromGeneratedBranchWithRunner(transport.NewLocalRunner(), repoPath, branchName, sessionName)
+}
+
 // IsExistingBranch returns whether this worktree uses a pre-existing branch
 func (g *GitWorktree) IsExistingBranch() bool {
 	return g.isExistingBranch

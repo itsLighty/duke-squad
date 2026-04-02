@@ -10,24 +10,25 @@ import (
 
 // InstanceData represents the serializable data of an Instance.
 type InstanceData struct {
-	ID               string           `json:"id"`
-	ProjectID        string           `json:"project_id"`
-	ProjectKind      ProjectKind      `json:"project_kind"`
-	ProjectTransport ProjectTransport `json:"project_transport,omitempty"`
-	SSHTarget        string           `json:"ssh_target,omitempty"`
-	SSHUser          string           `json:"ssh_user,omitempty"`
-	SSHHost          string           `json:"ssh_host,omitempty"`
-	Title            string           `json:"title"`
-	Path             string           `json:"path"`
-	Branch           string           `json:"branch"`
-	Status           Status           `json:"status"`
-	Height           int              `json:"height"`
-	Width            int              `json:"width"`
-	CreatedAt        time.Time        `json:"created_at"`
-	UpdatedAt        time.Time        `json:"updated_at"`
-	AutoYes          bool             `json:"auto_yes"`
-	Program          string           `json:"program"`
-	Workspace        WorkspaceData    `json:"workspace"`
+	ID                string           `json:"id"`
+	ProjectID         string           `json:"project_id"`
+	ProjectKind       ProjectKind      `json:"project_kind"`
+	ProjectTransport  ProjectTransport `json:"project_transport,omitempty"`
+	SSHTarget         string           `json:"ssh_target,omitempty"`
+	SSHUser           string           `json:"ssh_user,omitempty"`
+	SSHHost           string           `json:"ssh_host,omitempty"`
+	Title             string           `json:"title"`
+	Path              string           `json:"path"`
+	Branch            string           `json:"branch"`
+	BranchDescription string           `json:"branch_description,omitempty"`
+	Status            Status           `json:"status"`
+	Height            int              `json:"height"`
+	Width             int              `json:"width"`
+	CreatedAt         time.Time        `json:"created_at"`
+	UpdatedAt         time.Time        `json:"updated_at"`
+	AutoYes           bool             `json:"auto_yes"`
+	Program           string           `json:"program"`
+	Workspace         WorkspaceData    `json:"workspace"`
 
 	// Worktree is retained for one-shot migration from the legacy storage shape.
 	Worktree  GitWorktreeData `json:"worktree"`

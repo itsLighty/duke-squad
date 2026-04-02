@@ -177,3 +177,105 @@ func TestSaveAndLoadProjectsPreservesSSHMetadata(t *testing.T) {
 	require.Equal(t, "dukebot.local", loaded[0].Sessions[0].SSHHost)
 	require.Equal(t, "~/.claude-squad/worktrees/codex_remote", loaded[0].Sessions[0].GetWorktreePath())
 }
+
+func TestSaveAndLoadProjectsPreservesBranchDescription(t *testing.T) {
+	now := time.Now()
+	instance, err := FromInstanceData(InstanceData{
+		ID:                "sess_branch",
+		ProjectID:         "proj_branch",
+		ProjectKind:       ProjectKindGit,
+		ProjectTransport:  ProjectTransportLocal,
+		Title:             "branch-metadata",
+		Path:              "/tmp/repo",
+		Branch:            "dev/branch-metadata",
+		BranchDescription: "Document the generated branch",
+		Status:            Paused,
+		Program:           "codex",
+		CreatedAt:         now,
+		UpdatedAt:         now,
+		Workspace: WorkspaceData{
+			Type:          ProjectKindGit,
+			Transport:     ProjectTransportLocal,
+			RootPath:      "/tmp/repo",
+			WorkspacePath: "/tmp/worktrees/dev_branch-metadata",
+			BranchName:    "dev/branch-metadata",
+			BaseCommitSHA: "abc123",
+		},
+	})
+	require.NoError(t, err)
+
+	project := &Project{
+		ID:        "proj_branch",
+		Name:      "repo",
+		RootPath:  "/tmp/repo",
+		Kind:      ProjectKindGit,
+		Transport: ProjectTransportLocal,
+		CreatedAt: now,
+		UpdatedAt: now,
+		Sessions:  []*Instance{instance},
+	}
+
+	state := &fakeState{
+		projects:  json.RawMessage("[]"),
+		instances: json.RawMessage("[]"),
+	}
+	storage, err := NewStorage(state)
+	require.NoError(t, err)
+	require.NoError(t, storage.SaveProjects([]*Project{project}))
+	require.Contains(t, string(state.projects), `"branch_description":"Document the generated branch"`)
+
+	loaded, err := storage.LoadProjects()
+	require.NoError(t, err)
+	require.Len(t, loaded, 1)
+	require.Len(t, loaded[0].Sessions, 1)
+	require.Equal(t, "Document the generated branch", loaded[0].Sessions[0].BranchDescription)
+}
+
+func TestLoadProjectsHandlesMissingBranchDescription(t *testing.T) {
+	now := time.Now()
+	state := &fakeState{
+		projects: json.RawMessage(`[
+			{
+				"id":"proj_legacy",
+				"name":"repo",
+				"root_path":"/tmp/repo",
+				"kind":"git",
+				"transport":"local",
+				"created_at":"` + now.Format(time.RFC3339Nano) + `",
+				"updated_at":"` + now.Format(time.RFC3339Nano) + `",
+				"sessions":[
+					{
+						"id":"sess_legacy",
+						"project_id":"proj_legacy",
+						"project_kind":"git",
+						"project_transport":"local",
+						"title":"legacy",
+						"path":"/tmp/repo",
+						"branch":"dev/legacy",
+						"status":3,
+						"created_at":"` + now.Format(time.RFC3339Nano) + `",
+						"updated_at":"` + now.Format(time.RFC3339Nano) + `",
+						"program":"codex",
+						"workspace":{
+							"type":"git",
+							"transport":"local",
+							"root_path":"/tmp/repo",
+							"workspace_path":"/tmp/worktrees/dev_legacy",
+							"branch_name":"dev/legacy",
+							"base_commit_sha":"abc123"
+						}
+					}
+				]
+			}
+		]`),
+		instances: json.RawMessage("[]"),
+	}
+	storage, err := NewStorage(state)
+	require.NoError(t, err)
+
+	loaded, err := storage.LoadProjects()
+	require.NoError(t, err)
+	require.Len(t, loaded, 1)
+	require.Len(t, loaded[0].Sessions, 1)
+	require.Empty(t, loaded[0].Sessions[0].BranchDescription)
+}

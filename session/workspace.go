@@ -135,25 +135,26 @@ func (g *gitWorkspace) ToData() WorkspaceData {
 	}
 }
 
-func newGitWorkspace(projectTransport ProjectTransport, sshTarget string, sshUser string, sshHost string, rootPath string, sessionID string, title string, selectedBranch string) (Workspace, string, error) {
+func newGitWorkspace(projectTransport ProjectTransport, sshTarget string, sshUser string, sshHost string, rootPath string, sessionID string, title string, prompt string, selectedBranch string) (Workspace, string, string, error) {
 	handleName := sessionHandleName(sessionID, title)
 	runner, err := runnerFor(projectTransport, sshTarget, sshUser, sshHost)
 	if err != nil {
-		return nil, "", err
+		return nil, "", "", err
 	}
 	if selectedBranch != "" {
 		worktree, err := git.NewGitWorktreeFromBranchWithRunner(runner, rootPath, selectedBranch, handleName)
 		if err != nil {
-			return nil, "", err
+			return nil, "", "", err
 		}
-		return &gitWorkspace{worktree: worktree}, selectedBranch, nil
+		return &gitWorkspace{worktree: worktree}, selectedBranch, "", nil
 	}
 
-	worktree, branchName, err := git.NewGitWorktreeWithRunner(runner, rootPath, handleName)
+	branchMetadata := git.GenerateBranchMetadata(rootPath, projectBaseName(projectTransport, rootPath), title, prompt)
+	worktree, err := git.NewGitWorktreeFromGeneratedBranchWithRunner(runner, rootPath, branchMetadata.BranchName, handleName)
 	if err != nil {
-		return nil, "", err
+		return nil, "", "", err
 	}
-	return &gitWorkspace{worktree: worktree}, branchName, nil
+	return &gitWorkspace{worktree: worktree}, branchMetadata.BranchName, branchMetadata.Description, nil
 }
 
 func workspaceFromData(data WorkspaceData, legacy GitWorktreeData) (Workspace, string, error) {
@@ -634,14 +635,15 @@ func CleanupManagedWorkspaces() error {
 	return cleanupManagedWorkspaces()
 }
 
-func createWorkspace(projectTransport ProjectTransport, sshTarget string, sshUser string, sshHost string, kind ProjectKind, rootPath string, sessionID string, title string, selectedBranch string) (Workspace, string, error) {
+func createWorkspace(projectTransport ProjectTransport, sshTarget string, sshUser string, sshHost string, kind ProjectKind, rootPath string, sessionID string, title string, prompt string, selectedBranch string) (Workspace, string, string, error) {
 	switch kind {
 	case ProjectKindGit:
-		return newGitWorkspace(projectTransport, sshTarget, sshUser, sshHost, rootPath, sessionID, title, selectedBranch)
+		return newGitWorkspace(projectTransport, sshTarget, sshUser, sshHost, rootPath, sessionID, title, prompt, selectedBranch)
 	case ProjectKindFolder:
-		return newFolderWorkspaceWithTransportAndUser(projectTransport, sshTarget, sshUser, sshHost, rootPath, sessionID, title)
+		workspace, branchName, err := newFolderWorkspaceWithTransportAndUser(projectTransport, sshTarget, sshUser, sshHost, rootPath, sessionID, title)
+		return workspace, branchName, "", err
 	default:
-		return nil, "", fmt.Errorf("unsupported project kind %q", kind)
+		return nil, "", "", fmt.Errorf("unsupported project kind %q", kind)
 	}
 }
 
