@@ -232,12 +232,7 @@ func TestRunCodexBranchMetadataGenerator(t *testing.T) {
 	parentCwd, err := os.Getwd()
 	require.NoError(t, err)
 
-	makeScript := func(promptFile, pwdFile, expectedRepoDir string, expectCD bool) string {
-		cdCheck := `[ -z "$repo_dir" ]`
-		if expectCD {
-			cdCheck = fmt.Sprintf(`[ "$repo_dir" = %q ]`, expectedRepoDir)
-		}
-
+	makeScript := func(promptFile, pwdFile string) string {
 		return fmt.Sprintf(`#!/bin/sh
 set -eu
 
@@ -271,7 +266,7 @@ done
 [ "$subcommand" = "exec" ]
 [ "$model" = "$expected_model" ]
 [ "$sandbox" = "$expected_sandbox" ]
-%s
+[ -z "$repo_dir" ]
 [ -n "$skip_git_repo_check" ]
 [ -n "$ephemeral" ]
 [ -f "$schema_path" ]
@@ -287,15 +282,15 @@ fi
 pwd > %q
 cat > %q
 printf '{"slug":"feature/fake-branch","description":"  generated description  "}' > "$output_path"
-`, cdCheck, pwdFile, promptFile)
+`, pwdFile, promptFile)
 	}
 
-	runWithRepoPath := func(t *testing.T, repoPath string, expectCD bool) {
+	runWithRepoPath := func(t *testing.T, repoPath string) {
 		t.Helper()
 		promptFile := filepath.Join(tempDir, strings.NewReplacer("/", "_", " ", "_").Replace(t.Name())+".prompt")
 		pwdFile := filepath.Join(tempDir, strings.NewReplacer("/", "_", " ", "_").Replace(t.Name())+".pwd")
 
-		require.NoError(t, os.WriteFile(codexPath, []byte(makeScript(promptFile, pwdFile, repoPath, expectCD)), 0o755))
+		require.NoError(t, os.WriteFile(codexPath, []byte(makeScript(promptFile, pwdFile)), 0o755))
 
 		originalResolver := getCodexProgramCommand
 		t.Cleanup(func() {
@@ -321,22 +316,18 @@ printf '{"slug":"feature/fake-branch","description":"  generated description  "}
 		pwdBytes, err := os.ReadFile(pwdFile)
 		require.NoError(t, err)
 		pwd := strings.TrimSpace(string(pwdBytes))
-		if expectCD {
-			assert.Equal(t, repoPath, pwd)
-		} else {
-			assert.NotEqual(t, parentCwd, pwd)
-			assert.NotEqual(t, repoPath, pwd)
-			assert.True(t, strings.HasPrefix(pwd, os.TempDir()))
-		}
+		assert.NotEqual(t, parentCwd, pwd)
+		assert.NotEqual(t, repoPath, pwd)
+		assert.True(t, strings.HasPrefix(pwd, os.TempDir()))
 	}
 
-	t.Run("omits cd for non-local repo paths", func(t *testing.T) {
-		runWithRepoPath(t, filepath.Join(tempDir, "remote", "repo.git"), false)
+	t.Run("runs from neutral cwd for non-local repo paths", func(t *testing.T) {
+		runWithRepoPath(t, filepath.Join(tempDir, "remote", "repo.git"))
 	})
 
-	t.Run("passes cd for local repo paths", func(t *testing.T) {
+	t.Run("runs from neutral cwd for local repo paths", func(t *testing.T) {
 		repoPath := filepath.Join(tempDir, "local-repo")
 		require.NoError(t, os.MkdirAll(repoPath, 0o755))
-		runWithRepoPath(t, repoPath, true)
+		runWithRepoPath(t, repoPath)
 	})
 }

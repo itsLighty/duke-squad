@@ -95,29 +95,14 @@ func runCodexBranchMetadataGenerator(repoPath, repoName, title, prompt string) (
 		"--ephemeral",
 		"-",
 	}
-	if shouldUseRepoPath(repoPath) {
-		args = []string{
-			"exec",
-			"--model", codexBranchModel,
-			"--sandbox", "read-only",
-			"--cd", repoPath,
-			"--skip-git-repo-check",
-			"--output-schema", schemaPath,
-			"--output-last-message", outputPath,
-			"--ephemeral",
-			"-",
-		}
-	}
 
 	cmd := exec.CommandContext(ctx, codexPath, args...)
-	if !shouldUseRepoPath(repoPath) {
-		neutralDir, err := os.MkdirTemp("", "codex-branch-metadata-*")
-		if err != nil {
-			return "", fmt.Errorf("codex branch metadata neutral directory failed: %w", err)
-		}
-		defer os.RemoveAll(neutralDir)
-		cmd.Dir = neutralDir
+	neutralDir, err := os.MkdirTemp("", "codex-branch-metadata-*")
+	if err != nil {
+		return "", fmt.Errorf("codex branch metadata neutral directory failed: %w", err)
 	}
+	defer os.RemoveAll(neutralDir)
+	cmd.Dir = neutralDir
 	cmd.Stdin = strings.NewReader(codexMetadataPrompt(repoName, title, prompt))
 
 	if output, err := cmd.CombinedOutput(); err != nil {
@@ -259,17 +244,4 @@ func logBranchMetadataFallback(message string, err error) {
 		return
 	}
 	log.ErrorLog.Printf("%s", message)
-}
-
-func shouldUseRepoPath(repoPath string) bool {
-	if strings.TrimSpace(repoPath) == "" {
-		return false
-	}
-
-	info, err := os.Stat(repoPath)
-	if err != nil || !info.IsDir() {
-		return false
-	}
-
-	return true
 }
