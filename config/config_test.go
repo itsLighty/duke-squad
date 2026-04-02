@@ -138,8 +138,7 @@ func TestDefaultConfig(t *testing.T) {
 		assert.NotEmpty(t, config.DefaultProgram)
 		assert.True(t, config.AutoYes)
 		assert.Equal(t, 1000, config.DaemonPollInterval)
-		assert.NotEmpty(t, config.BranchPrefix)
-		assert.True(t, strings.HasSuffix(config.BranchPrefix, "/"))
+		assert.Equal(t, "dev/", config.BranchPrefix)
 	})
 
 }
@@ -171,7 +170,7 @@ func TestLoadConfig(t *testing.T) {
 		assert.NotEmpty(t, config.DefaultProgram)
 		assert.True(t, config.AutoYes)
 		assert.Equal(t, 1000, config.DaemonPollInterval)
-		assert.NotEmpty(t, config.BranchPrefix)
+		assert.Equal(t, "dev/", config.BranchPrefix)
 	})
 
 	t.Run("loads valid config file", func(t *testing.T) {
@@ -266,6 +265,7 @@ func TestLoadConfig(t *testing.T) {
 		assert.NotEmpty(t, config.DefaultProgram)
 		assert.True(t, config.AutoYes)                   // Default value
 		assert.Equal(t, 1000, config.DaemonPollInterval) // Default value
+		assert.Equal(t, "dev/", config.BranchPrefix)
 	})
 }
 
