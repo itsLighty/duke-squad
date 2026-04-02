@@ -229,8 +229,10 @@ func TestRunCodexBranchMetadataGenerator(t *testing.T) {
 
 	tempDir := t.TempDir()
 	codexPath := filepath.Join(tempDir, "codex")
+	parentCwd, err := os.Getwd()
+	require.NoError(t, err)
 
-	makeScript := func(promptFile, expectedRepoDir string, expectCD bool) string {
+	makeScript := func(promptFile, pwdFile, expectedRepoDir string, expectCD bool) string {
 		cdCheck := `[ -z "$repo_dir" ]`
 		if expectCD {
 			cdCheck = fmt.Sprintf(`[ "$repo_dir" = %q ]`, expectedRepoDir)
@@ -279,16 +281,21 @@ grep -q '"slug"' "$schema_path"
 ! grep -q 'branch_name' "$schema_path"
 grep -q '"description"' "$schema_path"
 
+if [ -n "$repo_dir" ]; then
+	cd "$repo_dir"
+fi
+pwd > %q
 cat > %q
 printf '{"slug":"feature/fake-branch","description":"  generated description  "}' > "$output_path"
-`, cdCheck, promptFile)
+`, cdCheck, pwdFile, promptFile)
 	}
 
 	runWithRepoPath := func(t *testing.T, repoPath string, expectCD bool) {
 		t.Helper()
 		promptFile := filepath.Join(tempDir, strings.NewReplacer("/", "_", " ", "_").Replace(t.Name())+".prompt")
+		pwdFile := filepath.Join(tempDir, strings.NewReplacer("/", "_", " ", "_").Replace(t.Name())+".pwd")
 
-		require.NoError(t, os.WriteFile(codexPath, []byte(makeScript(promptFile, repoPath, expectCD)), 0o755))
+		require.NoError(t, os.WriteFile(codexPath, []byte(makeScript(promptFile, pwdFile, repoPath, expectCD)), 0o755))
 
 		originalResolver := getCodexProgramCommand
 		t.Cleanup(func() {
@@ -310,6 +317,17 @@ printf '{"slug":"feature/fake-branch","description":"  generated description  "}
 		assert.Contains(t, prompt, "project-x")
 		assert.Contains(t, prompt, "Different title")
 		assert.Contains(t, prompt, "Explain the change")
+
+		pwdBytes, err := os.ReadFile(pwdFile)
+		require.NoError(t, err)
+		pwd := strings.TrimSpace(string(pwdBytes))
+		if expectCD {
+			assert.Equal(t, repoPath, pwd)
+		} else {
+			assert.NotEqual(t, parentCwd, pwd)
+			assert.NotEqual(t, repoPath, pwd)
+			assert.True(t, strings.HasPrefix(pwd, os.TempDir()))
+		}
 	}
 
 	t.Run("omits cd for non-local repo paths", func(t *testing.T) {

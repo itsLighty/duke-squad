@@ -110,6 +110,14 @@ func runCodexBranchMetadataGenerator(repoPath, repoName, title, prompt string) (
 	}
 
 	cmd := exec.CommandContext(ctx, codexPath, args...)
+	if !shouldUseRepoPath(repoPath) {
+		neutralDir, err := os.MkdirTemp("", "codex-branch-metadata-*")
+		if err != nil {
+			return "", fmt.Errorf("codex branch metadata neutral directory failed: %w", err)
+		}
+		defer os.RemoveAll(neutralDir)
+		cmd.Dir = neutralDir
+	}
 	cmd.Stdin = strings.NewReader(codexMetadataPrompt(repoName, title, prompt))
 
 	if output, err := cmd.CombinedOutput(); err != nil {
