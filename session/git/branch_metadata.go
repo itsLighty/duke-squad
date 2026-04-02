@@ -10,9 +10,11 @@ import (
 	"time"
 
 	"claude-squad/config"
+	"claude-squad/log"
 )
 
 const codexBranchModel = "gpt-5.4-mini"
+const maxBranchDescriptionLength = 80
 
 type codexBranchMetadata struct {
 	Slug        string `json:"slug"`
@@ -34,22 +36,26 @@ func GenerateBranchMetadata(repoPath, repoName, title, prompt string) BranchMeta
 
 	raw, err := runBranchMetadataGenerator(repoPath, repoName, title, prompt)
 	if err != nil {
+		logBranchMetadataFallback("failed to generate codex branch metadata", err)
 		return fallback
 	}
 
 	var generated codexBranchMetadata
 	if err := json.Unmarshal([]byte(raw), &generated); err != nil {
+		logBranchMetadataFallback("failed to decode codex branch metadata", err)
 		return fallback
 	}
 
 	branchName := normalizeGeneratedBranchSlug(generated.Slug)
 	if branchName == "" {
-		branchName = fallback.BranchName
+		logBranchMetadataFallback("codex branch metadata missing slug", nil)
+		return fallback
 	}
 
 	description := normalizeBranchDescription(generated.Description)
 	if description == "" {
-		description = fallback.Description
+		logBranchMetadataFallback("codex branch metadata missing description", nil)
+		return fallback
 	}
 
 	return BranchMetadata{
@@ -204,6 +210,7 @@ func normalizeGeneratedBranchSlug(raw string) string {
 		}
 	}
 
+	slug = strings.NewReplacer("/", "-", ".", "-").Replace(slug)
 	slug = sanitizeBranchName(slug)
 	if slug == "" {
 		return ""
@@ -213,5 +220,21 @@ func normalizeGeneratedBranchSlug(raw string) string {
 }
 
 func normalizeBranchDescription(raw string) string {
-	return strings.Join(strings.Fields(strings.TrimSpace(raw)), " ")
+	description := strings.Join(strings.Fields(strings.TrimSpace(raw)), " ")
+	runes := []rune(description)
+	if len(runes) > maxBranchDescriptionLength {
+		description = string(runes[:maxBranchDescriptionLength])
+	}
+	return description
+}
+
+func logBranchMetadataFallback(message string, err error) {
+	if log.ErrorLog == nil {
+		return
+	}
+	if err != nil {
+		log.ErrorLog.Printf("%s: %v", message, err)
+		return
+	}
+	log.ErrorLog.Printf("%s", message)
 }

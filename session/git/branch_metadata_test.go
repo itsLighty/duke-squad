@@ -1,12 +1,17 @@
 package git
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
+	stdlog "log"
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
+
+	"claude-squad/log"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -33,6 +38,11 @@ func TestNormalizeGeneratedBranchSlug(t *testing.T) {
 			input: "dev/feature/Improve-Docs",
 			want:  "dev/improve-docs",
 		},
+		{
+			name:  "flattens slash and dot separators from model output",
+			input: "platform/auth.v2",
+			want:  "dev/platform-auth-v2",
+		},
 	}
 
 	for _, tt := range tests {
@@ -43,9 +53,28 @@ func TestNormalizeGeneratedBranchSlug(t *testing.T) {
 }
 
 func TestNormalizeBranchDescription(t *testing.T) {
-	got := normalizeBranchDescription("  Ship   the\nfeature\tquickly  ")
+	tests := []struct {
+		name  string
+		input string
+		want  string
+	}{
+		{
+			name:  "collapses whitespace",
+			input: "  Ship   the\nfeature\tquickly  ",
+			want:  "Ship the feature quickly",
+		},
+		{
+			name:  "truncates long descriptions",
+			input: strings.Repeat("a", maxBranchDescriptionLength+12),
+			want:  strings.Repeat("a", maxBranchDescriptionLength),
+		},
+	}
 
-	assert.Equal(t, "Ship the feature quickly", got)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, normalizeBranchDescription(tt.input))
+		})
+	}
 }
 
 func TestGenerateBranchMetadata(t *testing.T) {
@@ -88,6 +117,64 @@ func TestGenerateBranchMetadata(t *testing.T) {
 			Description: "Launch feature",
 		}, got)
 	})
+}
+
+func TestGenerateBranchMetadataFallbackLogging(t *testing.T) {
+	type testCase struct {
+		name           string
+		raw            string
+		wantBranchName string
+		wantLog        string
+	}
+
+	cases := []testCase{
+		{
+			name:           "malformed json falls back and logs",
+			raw:            "{",
+			wantBranchName: "dev/launch-feature",
+			wantLog:        "failed to decode codex branch metadata",
+		},
+		{
+			name:           "empty slug falls back and logs",
+			raw:            `{"slug":"   ","description":"Generated summary"}`,
+			wantBranchName: "dev/launch-feature",
+			wantLog:        "codex branch metadata missing slug",
+		},
+		{
+			name:           "empty description falls back and logs",
+			raw:            `{"slug":"feature/platform/auth","description":"   "}`,
+			wantBranchName: "dev/launch-feature",
+			wantLog:        "codex branch metadata missing description",
+		},
+	}
+
+	for _, tt := range cases {
+		t.Run(tt.name, func(t *testing.T) {
+			originalRunner := runBranchMetadataGenerator
+			t.Cleanup(func() {
+				runBranchMetadataGenerator = originalRunner
+			})
+
+			var buf bytes.Buffer
+			originalLog := log.ErrorLog
+			t.Cleanup(func() {
+				log.ErrorLog = originalLog
+			})
+			log.ErrorLog = stdlog.New(&buf, "", 0)
+
+			runBranchMetadataGenerator = func(repoPath, repoName, title, prompt string) (string, error) {
+				return tt.raw, nil
+			}
+
+			got := GenerateBranchMetadata("/tmp/repo", "project-x", "Launch feature", "Explain the change")
+
+			assert.Equal(t, BranchMetadata{
+				BranchName:  tt.wantBranchName,
+				Description: "Launch feature",
+			}, got)
+			assert.Contains(t, buf.String(), tt.wantLog)
+		})
+	}
 }
 
 func TestRunCodexBranchMetadataGenerator(t *testing.T) {
