@@ -100,6 +100,42 @@ func TestGenerateBranchMetadata(t *testing.T) {
 		}, got)
 	})
 
+	t.Run("keeps valid slug when description is empty", func(t *testing.T) {
+		original := runBranchMetadataGenerator
+		t.Cleanup(func() {
+			runBranchMetadataGenerator = original
+		})
+
+		runBranchMetadataGenerator = func(repoPath, repoName, title, prompt string) (string, error) {
+			return `{"slug":"feature/platform/auth","description":"   "}`, nil
+		}
+
+		got := GenerateBranchMetadata("/tmp/repo", "project-x", "Launch feature", "Explain the change")
+
+		assert.Equal(t, BranchMetadata{
+			BranchName:  "dev/platform-auth",
+			Description: "Launch feature",
+		}, got)
+	})
+
+	t.Run("keeps valid description when slug is empty", func(t *testing.T) {
+		original := runBranchMetadataGenerator
+		t.Cleanup(func() {
+			runBranchMetadataGenerator = original
+		})
+
+		runBranchMetadataGenerator = func(repoPath, repoName, title, prompt string) (string, error) {
+			return `{"slug":"   ","description":"  Ship   the\nfeature\tquickly  "}`, nil
+		}
+
+		got := GenerateBranchMetadata("/tmp/repo", "project-x", "Launch feature", "Explain the change")
+
+		assert.Equal(t, BranchMetadata{
+			BranchName:  "dev/launch-feature",
+			Description: "Ship the feature quickly",
+		}, got)
+	})
+
 	t.Run("falls back when codex fails", func(t *testing.T) {
 		original := runBranchMetadataGenerator
 		t.Cleanup(func() {
@@ -121,30 +157,34 @@ func TestGenerateBranchMetadata(t *testing.T) {
 
 func TestGenerateBranchMetadataFallbackLogging(t *testing.T) {
 	type testCase struct {
-		name           string
-		raw            string
-		wantBranchName string
-		wantLog        string
+		name            string
+		raw             string
+		wantBranchName  string
+		wantDescription string
+		wantLog         string
 	}
 
 	cases := []testCase{
 		{
-			name:           "malformed json falls back and logs",
-			raw:            "{",
-			wantBranchName: "dev/launch-feature",
-			wantLog:        "failed to decode codex branch metadata",
+			name:            "malformed json falls back and logs",
+			raw:             "{",
+			wantBranchName:  "dev/launch-feature",
+			wantDescription: "Launch feature",
+			wantLog:         "failed to decode codex branch metadata",
 		},
 		{
-			name:           "empty slug falls back and logs",
-			raw:            `{"slug":"   ","description":"Generated summary"}`,
-			wantBranchName: "dev/launch-feature",
-			wantLog:        "codex branch metadata missing slug",
+			name:            "empty slug keeps description and logs",
+			raw:             `{"slug":"   ","description":"Generated summary"}`,
+			wantBranchName:  "dev/launch-feature",
+			wantDescription: "Generated summary",
+			wantLog:         "codex branch metadata missing slug",
 		},
 		{
-			name:           "empty description falls back and logs",
-			raw:            `{"slug":"feature/platform/auth","description":"   "}`,
-			wantBranchName: "dev/launch-feature",
-			wantLog:        "codex branch metadata missing description",
+			name:            "empty description keeps slug and logs",
+			raw:             `{"slug":"feature/platform/auth","description":"   "}`,
+			wantBranchName:  "dev/platform-auth",
+			wantDescription: "Launch feature",
+			wantLog:         "codex branch metadata missing description",
 		},
 	}
 
@@ -170,7 +210,7 @@ func TestGenerateBranchMetadataFallbackLogging(t *testing.T) {
 
 			assert.Equal(t, BranchMetadata{
 				BranchName:  tt.wantBranchName,
-				Description: "Launch feature",
+				Description: tt.wantDescription,
 			}, got)
 			assert.Contains(t, buf.String(), tt.wantLog)
 		})
@@ -183,8 +223,7 @@ func TestRunCodexBranchMetadataGenerator(t *testing.T) {
 	}
 
 	tempDir := t.TempDir()
-	repoPath := filepath.Join(tempDir, "repo")
-	require.NoError(t, os.MkdirAll(repoPath, 0o755))
+	repoPath := filepath.Join(tempDir, "remote", "repo.git")
 
 	promptFile := filepath.Join(tempDir, "prompt.txt")
 	codexPath := filepath.Join(tempDir, "codex")
@@ -192,7 +231,6 @@ func TestRunCodexBranchMetadataGenerator(t *testing.T) {
 	script := fmt.Sprintf(`#!/bin/sh
 set -eu
 
-expected_repo=%q
 expected_model=gpt-5.4-mini
 expected_sandbox=read-only
 
@@ -223,7 +261,7 @@ done
 [ "$subcommand" = "exec" ]
 [ "$model" = "$expected_model" ]
 [ "$sandbox" = "$expected_sandbox" ]
-[ "$repo_dir" = "$expected_repo" ]
+[ -z "$repo_dir" ]
 [ -n "$skip_git_repo_check" ]
 [ -n "$ephemeral" ]
 [ -f "$schema_path" ]
@@ -235,7 +273,7 @@ grep -q '"description"' "$schema_path"
 
 cat > %q
 printf '{"slug":"feature/fake-branch","description":"  generated description  "}' > "$output_path"
-`, repoPath, promptFile)
+`, promptFile)
 
 	require.NoError(t, os.WriteFile(codexPath, []byte(script), 0o755))
 

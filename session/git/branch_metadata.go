@@ -49,13 +49,13 @@ func GenerateBranchMetadata(repoPath, repoName, title, prompt string) BranchMeta
 	branchName := normalizeGeneratedBranchSlug(generated.Slug)
 	if branchName == "" {
 		logBranchMetadataFallback("codex branch metadata missing slug", nil)
-		return fallback
+		branchName = fallback.BranchName
 	}
 
 	description := normalizeBranchDescription(generated.Description)
 	if description == "" {
 		logBranchMetadataFallback("codex branch metadata missing description", nil)
-		return fallback
+		description = fallback.Description
 	}
 
 	return BranchMetadata{
@@ -85,17 +85,31 @@ func runCodexBranchMetadataGenerator(repoPath, repoName, title, prompt string) (
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
 
-	cmd := exec.CommandContext(ctx, codexPath,
+	args := []string{
 		"exec",
 		"--model", codexBranchModel,
 		"--sandbox", "read-only",
-		"--cd", repoPath,
 		"--skip-git-repo-check",
 		"--output-schema", schemaPath,
 		"--output-last-message", outputPath,
 		"--ephemeral",
 		"-",
-	)
+	}
+	if shouldUseRepoPath(repoPath) {
+		args = []string{
+			"exec",
+			"--model", codexBranchModel,
+			"--sandbox", "read-only",
+			"--cd", repoPath,
+			"--skip-git-repo-check",
+			"--output-schema", schemaPath,
+			"--output-last-message", outputPath,
+			"--ephemeral",
+			"-",
+		}
+	}
+
+	cmd := exec.CommandContext(ctx, codexPath, args...)
 	cmd.Stdin = strings.NewReader(codexMetadataPrompt(repoName, title, prompt))
 
 	if output, err := cmd.CombinedOutput(); err != nil {
@@ -237,4 +251,17 @@ func logBranchMetadataFallback(message string, err error) {
 		return
 	}
 	log.ErrorLog.Printf("%s", message)
+}
+
+func shouldUseRepoPath(repoPath string) bool {
+	if strings.TrimSpace(repoPath) == "" {
+		return false
+	}
+
+	info, err := os.Stat(repoPath)
+	if err != nil || !info.IsDir() {
+		return false
+	}
+
+	return true
 }
