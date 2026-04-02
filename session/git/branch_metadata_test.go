@@ -43,6 +43,11 @@ func TestNormalizeGeneratedBranchSlug(t *testing.T) {
 			input: "platform/auth.v2",
 			want:  "dev/platform-auth-v2",
 		},
+		{
+			name:  "converts underscores to hyphens",
+			input: "feature/user_profile_sync",
+			want:  "dev/user-profile-sync",
+		},
 	}
 
 	for _, tt := range tests {
@@ -223,12 +228,15 @@ func TestRunCodexBranchMetadataGenerator(t *testing.T) {
 	}
 
 	tempDir := t.TempDir()
-	repoPath := filepath.Join(tempDir, "remote", "repo.git")
-
-	promptFile := filepath.Join(tempDir, "prompt.txt")
 	codexPath := filepath.Join(tempDir, "codex")
 
-	script := fmt.Sprintf(`#!/bin/sh
+	makeScript := func(promptFile, expectedRepoDir string, expectCD bool) string {
+		cdCheck := `[ -z "$repo_dir" ]`
+		if expectCD {
+			cdCheck = fmt.Sprintf(`[ "$repo_dir" = %q ]`, expectedRepoDir)
+		}
+
+		return fmt.Sprintf(`#!/bin/sh
 set -eu
 
 expected_model=gpt-5.4-mini
@@ -261,7 +269,7 @@ done
 [ "$subcommand" = "exec" ]
 [ "$model" = "$expected_model" ]
 [ "$sandbox" = "$expected_sandbox" ]
-[ -z "$repo_dir" ]
+%s
 [ -n "$skip_git_repo_check" ]
 [ -n "$ephemeral" ]
 [ -f "$schema_path" ]
@@ -273,28 +281,44 @@ grep -q '"description"' "$schema_path"
 
 cat > %q
 printf '{"slug":"feature/fake-branch","description":"  generated description  "}' > "$output_path"
-`, promptFile)
-
-	require.NoError(t, os.WriteFile(codexPath, []byte(script), 0o755))
-
-	originalResolver := getCodexProgramCommand
-	t.Cleanup(func() {
-		getCodexProgramCommand = originalResolver
-	})
-	getCodexProgramCommand = func(name string) (string, error) {
-		require.Equal(t, "codex", name)
-		return codexPath, nil
+`, cdCheck, promptFile)
 	}
 
-	raw, err := runCodexBranchMetadataGenerator(repoPath, "project-x", "Different title", "Explain the change")
-	require.NoError(t, err)
-	assert.JSONEq(t, `{"slug":"feature/fake-branch","description":"  generated description  "}`, raw)
+	runWithRepoPath := func(t *testing.T, repoPath string, expectCD bool) {
+		t.Helper()
+		promptFile := filepath.Join(tempDir, strings.NewReplacer("/", "_", " ", "_").Replace(t.Name())+".prompt")
 
-	promptBytes, err := os.ReadFile(promptFile)
-	require.NoError(t, err)
-	prompt := string(promptBytes)
-	assert.NotContains(t, prompt, repoPath)
-	assert.Contains(t, prompt, "project-x")
-	assert.Contains(t, prompt, "Different title")
-	assert.Contains(t, prompt, "Explain the change")
+		require.NoError(t, os.WriteFile(codexPath, []byte(makeScript(promptFile, repoPath, expectCD)), 0o755))
+
+		originalResolver := getCodexProgramCommand
+		t.Cleanup(func() {
+			getCodexProgramCommand = originalResolver
+		})
+		getCodexProgramCommand = func(name string) (string, error) {
+			require.Equal(t, "codex", name)
+			return codexPath, nil
+		}
+
+		raw, err := runCodexBranchMetadataGenerator(repoPath, "project-x", "Different title", "Explain the change")
+		require.NoError(t, err)
+		assert.JSONEq(t, `{"slug":"feature/fake-branch","description":"  generated description  "}`, raw)
+
+		promptBytes, err := os.ReadFile(promptFile)
+		require.NoError(t, err)
+		prompt := string(promptBytes)
+		assert.NotContains(t, prompt, repoPath)
+		assert.Contains(t, prompt, "project-x")
+		assert.Contains(t, prompt, "Different title")
+		assert.Contains(t, prompt, "Explain the change")
+	}
+
+	t.Run("omits cd for non-local repo paths", func(t *testing.T) {
+		runWithRepoPath(t, filepath.Join(tempDir, "remote", "repo.git"), false)
+	})
+
+	t.Run("passes cd for local repo paths", func(t *testing.T) {
+		repoPath := filepath.Join(tempDir, "local-repo")
+		require.NoError(t, os.MkdirAll(repoPath, 0o755))
+		runWithRepoPath(t, repoPath, true)
+	})
 }

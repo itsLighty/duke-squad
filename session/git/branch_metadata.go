@@ -224,7 +224,7 @@ func normalizeGeneratedBranchSlug(raw string) string {
 		}
 	}
 
-	slug = strings.NewReplacer("/", "-", ".", "-").Replace(slug)
+	slug = strings.NewReplacer("/", "-", ".", "-", "_", "-").Replace(slug)
 	slug = sanitizeBranchName(slug)
 	if slug == "" {
 		return ""
