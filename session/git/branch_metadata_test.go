@@ -201,11 +201,11 @@ func TestGenerateBranchMetadataFallbackLogging(t *testing.T) {
 			})
 
 			var buf bytes.Buffer
-			originalLog := log.ErrorLog
+			originalLog := log.WarningLog
 			t.Cleanup(func() {
-				log.ErrorLog = originalLog
+				log.WarningLog = originalLog
 			})
-			log.ErrorLog = stdlog.New(&buf, "", 0)
+			log.WarningLog = stdlog.New(&buf, "", 0)
 
 			runBranchMetadataGenerator = func(repoPath, repoName, title, prompt string) (string, error) {
 				return tt.raw, nil

@@ -236,12 +236,12 @@ func normalizeBranchDescription(raw string) string {
 }
 
 func logBranchMetadataFallback(message string, err error) {
-	if log.ErrorLog == nil {
+	if log.WarningLog == nil {
 		return
 	}
 	if err != nil {
-		log.ErrorLog.Printf("%s: %v", message, err)
+		log.WarningLog.Printf("%s: %v", message, err)
 		return
 	}
-	log.ErrorLog.Printf("%s", message)
+	log.WarningLog.Printf("%s", message)
 }
