@@ -70,12 +70,21 @@ func (h helpTypeInstanceStart) toContent() string {
 		refLine = descStyle.Render(fmt.Sprintf("• Git branch: %s",
 			lipgloss.NewStyle().Bold(true).Render(h.instance.Branch)))
 	}
+	branchSummaryLine := ""
+	if h.instance.BranchDescription != "" {
+		branchSummaryLine = descStyle.Render(fmt.Sprintf("• Branch summary: %s", h.instance.BranchDescription))
+	}
 
-	content := lipgloss.JoinVertical(lipgloss.Left,
+	lines := []string{
 		titleStyle.Render("Instance Created"),
 		"",
 		descStyle.Render("New session created:"),
 		refLine,
+	}
+	if branchSummaryLine != "" {
+		lines = append(lines, branchSummaryLine)
+	}
+	lines = append(lines,
 		workspaceLine,
 		"",
 		headerStyle.Render("Managing:"),
@@ -87,6 +96,7 @@ func (h helpTypeInstanceStart) toContent() string {
 		keyStyle.Render("c")+descStyle.Render("     - Pause this instance"),
 		keyStyle.Render("p")+descStyle.Render("     - Push a Git-backed session to GitHub"),
 	)
+	content := lipgloss.JoinVertical(lipgloss.Left, lines...)
 	return content
 }
 

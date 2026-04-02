@@ -76,3 +76,24 @@ func TestSessionRowsRenderNestedUnderProject(t *testing.T) {
 
 	t.Fatalf("session row not found in %q", rendered)
 }
+
+func TestSessionRowRendersBranchDescription(t *testing.T) {
+	spin := spinner.New(spinner.WithSpinner(spinner.MiniDot))
+	list := NewList(&spin, false)
+	list.SetSize(80, 20)
+	list.SetProjects([]*session.Project{{
+		ID:   "proj-1",
+		Name: "claude-squad",
+		Kind: session.ProjectKindGit,
+		Sessions: []*session.Instance{{
+			ID:                "sess-1",
+			Title:             "ship polish",
+			Branch:            "dev/keep-preview-live",
+			BranchDescription: "Keep the preview pane updating while scrolled",
+		}},
+	}})
+
+	rendered := stripANSI(list.String())
+
+	require.Contains(t, rendered, "dev/keep-preview-live · Keep the preview pane updating while scrolled")
+}

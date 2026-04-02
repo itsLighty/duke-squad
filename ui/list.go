@@ -217,6 +217,8 @@ func (r *InstanceRenderer) renderSession(i *session.Instance, selected bool, tit
 		} else {
 			location = "starting..."
 		}
+	} else if i.BranchDescription != "" {
+		location = fmt.Sprintf("%s · %s", location, i.BranchDescription)
 	}
 
 	stat := i.GetDiffStats()
